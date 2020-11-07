@@ -1,0 +1,52 @@
+[package]
+name = "snjs_core"
+version = "0.6.0"
+authors = ["lsg <270150038@qq.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "snjs"
+crate-type = ["cdylib"]
+path = "lib.rs"
+
+[build-dependencies]
+downcast-rs = "1.1.1"
+futures = "0.3.5"
+lazy_static = "1.4.0"
+libc = "0.2.71"
+log = "0.4.8"
+rusty_v8 = {version = "0.12.0", path = "../rusty_v8"}
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0.55", features = [ "preserve_order" ] }
+smallvec = "1.4.0"
+url = "2.1.1"
+derive_deref = "1.1.0"
+tokio = { version = "0.2.22", features = ["full"] }
+indexmap = "1.6.0"
+anyhow = "1.0.32"
+dlopen = "0.1.8"
+rand = "0.7.3"
+sourcemap = "6.0.1"
+sys-info = "0.7.0"
+
+[dependencies]
+downcast-rs = "1.1.1"
+futures = "0.3.5"
+lazy_static = "1.4.0"
+libc = "0.2.71"
+log = "0.4.8"
+rusty_v8 = {version = "0.12.0", path = "../rusty_v8"}
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0.55", features = [ "preserve_order" ] }
+smallvec = "1.4.0"
+url = "2.1.1"
+derive_deref = "1.1.0"
+tokio = { version = "0.2.22", features = ["full"] }
+indexmap = "1.6.0"
+anyhow = "1.0.32"
+dlopen = "0.1.8"
+rand = "0.7.3"
+sourcemap = "6.0.1"
+sys-info = "0.7.0"
