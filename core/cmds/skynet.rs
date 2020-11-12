@@ -19,6 +19,7 @@ pub fn init(rt: &mut JsRuntime) {
     super::reg_json_sync(rt, "op_skynet_error", op_skynet_error);
     //super::reg_json_sync(rt, "op_skynet_now", op_skynet_now);
     rt.register_op("op_skynet_now", op_skynet_now_raw);
+    rt.register_op("op_skynet_genid", op_skynet_genid);
 }
 
 #[derive(Deserialize)]
@@ -166,3 +167,28 @@ pub fn op_skynet_now_raw(
     let v8_now = v8::Integer::new(scope, now as i32).into();
     rv.set(v8_now);
 }
+
+pub fn op_skynet_genid(
+    state: Rc<RefCell<OpState>>,
+    _s: &mut JsRuntimeState,
+    scope: &mut v8::HandleScope,
+    _args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let state = &mut state.borrow_mut();
+    let session = unsafe {
+        crate::skynet_send(
+            state.skynet,
+            0,
+            0,
+            crate::PTYPE_TAG_ALLOCSESSION,
+            0,
+            std::ptr::null(),
+            0,
+        )
+    };
+
+    let v8_session = v8::Integer::new(scope, session as i32).into();
+    rv.set(v8_session);
+}
+

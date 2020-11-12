@@ -19,6 +19,12 @@
     return core.jsonOpSync("op_system_memory_info");
   }
 
+  function v8MemoryInfo() {
+    let ret = core.rawOpSync("op_v8_memory_info");
+    let s = JSON.parse(core.decode(ret));
+    return s;
+  }
+
   function exit(code = 0) {
     core.jsonOpSync("op_exit", { code });
     throw new Error("Code not reachable");
@@ -59,6 +65,7 @@
     exit,
     osRelease,
     systemMemoryInfo,
+    v8MemoryInfo,
     hostname,
     loadavg,
     exists_file,

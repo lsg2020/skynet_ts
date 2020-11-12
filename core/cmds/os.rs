@@ -7,9 +7,14 @@ use crate::serde_json::Value;
 use crate::url::Url;
 use crate::OpState;
 use crate::ZeroCopyBuf;
+use crate::JsRuntimeState;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use rusty_v8 as v8;
 
 pub fn init(rt: &mut crate::JsRuntime) {
     super::reg_json_sync(rt, "op_exit", op_exit);
@@ -23,6 +28,7 @@ pub fn init(rt: &mut crate::JsRuntime) {
     super::reg_json_sync(rt, "op_os_release", op_os_release);
     super::reg_json_sync(rt, "op_system_memory_info", op_system_memory_info);
     super::reg_json_sync(rt, "op_file_exists", op_file_exists);
+    rt.register_op("op_v8_memory_info", op_v8_memory_info);
 }
 
 fn op_exec_path(
@@ -157,6 +163,37 @@ fn op_system_memory_info(
         })),
         Err(_) => Ok(json!({})),
     }
+}
+
+fn op_v8_memory_info(
+    _state: Rc<RefCell<OpState>>,
+    _s: &mut JsRuntimeState,
+    scope: &mut v8::HandleScope,
+    _args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let mut s = v8::HeapStatistics::default();
+    scope.get_heap_statistics(&mut s);
+
+    let ret = json!({
+        "total_heap_size": s.total_heap_size(),
+        "total_heap_size_executable": s.total_heap_size_executable(),
+        "total_physical_size": s.total_physical_size(),
+        "total_available_size": s.total_available_size(),
+        "total_global_handles_size": s.total_global_handles_size(),
+        "used_global_handles_size": s.used_global_handles_size(),
+        "used_heap_size": s.used_heap_size(),
+        "heap_size_limit": s.heap_size_limit(),
+        "malloced_memory": s.malloced_memory(),
+        "external_memory": s.external_memory(),
+        "peak_malloced_memory": s.peak_malloced_memory(),
+        "number_of_native_contexts": s.number_of_native_contexts(),
+        "number_of_detached_contexts": s.number_of_detached_contexts(),
+        "does_zap_garbage": s.does_zap_garbage(),
+    });
+
+    let buf = serde_json::to_vec(&ret).unwrap().into_boxed_slice();
+    rv.set(crate::bindings::boxed_slice_to_uint8array(scope, buf).into());
 }
 
 #[derive(Deserialize)]

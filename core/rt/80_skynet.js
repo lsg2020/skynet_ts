@@ -1,8 +1,26 @@
 ((window) => {
     const core = window.Deno.core;
 
-    function command(cmd, param) {
+    function command(cmd, param = "") {
         return core.jsonOpSync("op_skynet_command", { cmd: cmd, param: String(param) });
+    }
+
+    function addresscommand(cmd, param = "") {
+        let r = command(cmd, param);
+        if (!r || !r.result || r.result[0] != ":") {
+            return 0;
+        }
+
+        return parseInt(r.result.slice(1), 16)
+    }
+
+    function intcommand(cmd, param = "") {
+        let r = command(cmd, param);
+        if (!r || !r.result) {
+            return 0;
+        }
+
+        return Number(r.result)
     }
 
     function get_env(key, default_str) {
@@ -11,6 +29,10 @@
             return default_str;
         }
         return r.result;
+    }
+
+    function set_env(key, value) {
+        command("SETENV", `${key} ${value}`);
     }
 
     function send(addr, ptype, session, ...bufs) {
@@ -49,12 +71,20 @@
         command("EXIT")
     }
 
+    function genid() {
+        return core.rawOpSync("op_skynet_genid");
+    }
+
     window.__bootstrap.skynet = {
         command,
         get_env,
+        set_env,
         send,
         now,
         error,
         exit,
+        addresscommand,
+        intcommand,
+        genid,
     };
 })(this);
