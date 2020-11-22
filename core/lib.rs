@@ -18,6 +18,7 @@ mod ops;
 mod resources;
 mod runtime;
 mod zero_copy_buf;
+mod inspector;
 
 pub use futures;
 pub use rusty_v8 as v8;
@@ -175,6 +176,18 @@ pub extern "C" fn init_cb(
     cmds::errors::init(&mut ctx.isolate);
     cmds::random::init(&mut ctx.isolate, None);
     cmds::skynet::init(&mut ctx.isolate);
+    cmds::inspect::init(&mut ctx.isolate);
+
+    let inspector = get_env(ctx.skynet, "js_inspector", "false");
+    if inspector == "true" {
+        let context = ctx.isolate.global_context();
+
+        let state_rc = JsRuntime::state(ctx.isolate.v8_isolate());
+        let mut state = state_rc.borrow_mut();
+
+        let scope = &mut v8::HandleScope::with_context(ctx.isolate.v8_isolate(), context);
+        state.create_inspector(scope);
+    }
 
     ctx.isolate
         .execute("core.js", include_str!("core.js"))

@@ -8,13 +8,14 @@ use crate::error::AnyError;
 use crate::error::ErrWithV8Handle;
 use crate::error::JsError;
 
+use crate::inspector::Inspector;
 use crate::modules::ModuleId;
 use crate::modules::ModuleSource;
 use crate::modules::ModuleSpecifier;
 use crate::modules::Modules;
-
 use crate::ops::OpId;
 use crate::OpState;
+
 use libc::{c_int, c_void};
 use std::any::Any;
 use std::cell::RefCell;
@@ -64,6 +65,7 @@ pub struct JsRuntimeState {
     pub shared_bs: Option<v8::SharedRef<v8::BackingStore>>,
     pub module_search_paths: Vec<String>,
     pub module_resolve: HashMap<String, String>,
+    pub inspector: Option<Box<Inspector>>,
 }
 
 impl Drop for JsRuntime {
@@ -193,21 +195,22 @@ impl JsRuntime {
             allocations: IsolateAllocations::default(),
         });
 
-        runtime
-            .v8_isolate()
-            .set_slot(Rc::new(RefCell::new(JsRuntimeState {
-                global_context: Some(global_context),
-                pending_promise_exceptions: HashMap::new(),
-                js_recv_cb: None,
-                js_macrotask_cb: None,
-                js_error_create_fn,
-                op_state: Rc::new(RefCell::new(op_state)),
-                modules: Modules::new(),
-                dyn_import_list: Vec::new(),
-                shared_bs: None,
-                module_search_paths: Vec::new(),
-                module_resolve: HashMap::new(),
-            })));
+        let state = JsRuntimeState {
+            global_context: Some(global_context),
+            pending_promise_exceptions: HashMap::new(),
+            js_recv_cb: None,
+            js_macrotask_cb: None,
+            js_error_create_fn,
+            op_state: Rc::new(RefCell::new(op_state)),
+            modules: Modules::new(),
+            dyn_import_list: Vec::new(),
+            shared_bs: None,
+            module_search_paths: Vec::new(),
+            module_resolve: HashMap::new(),
+            inspector: None,
+        };
+
+        runtime.v8_isolate().set_slot(Rc::new(RefCell::new(state)));
 
         runtime
     }
@@ -856,11 +859,16 @@ impl JsRuntime {
                 _ => {
                     let mut alloc_sz = SHARED_MIN_SZ;
                     if let Some(bs) = shared_bs {
-                        alloc_sz = if bs.byte_length() > 0 { bs.byte_length() * 2 } else { SHARED_MIN_SZ };
+                        alloc_sz = if bs.byte_length() > 0 {
+                            bs.byte_length() * 2
+                        } else {
+                            SHARED_MIN_SZ
+                        };
                     }
                     alloc_sz = ((sz as f64 / alloc_sz as f64).ceil() * alloc_sz as f64) as usize;
                     if alloc_sz >= SHARED_MAX_SZ {
-                        alloc_sz = ((sz as f64 / SHARED_MIN_SZ as f64).ceil() * SHARED_MIN_SZ as f64) as usize;
+                        alloc_sz = ((sz as f64 / SHARED_MIN_SZ as f64).ceil()
+                            * SHARED_MIN_SZ as f64) as usize;
                     } else if alloc_sz < SHARED_MIN_SZ {
                         alloc_sz = SHARED_MIN_SZ;
                     }
@@ -905,5 +913,48 @@ impl JsRuntime {
         self.check_dyn_import();
         self.check_promise_exceptions()?;
         Ok(true)
+    }
+}
+
+impl JsRuntimeState {
+    pub fn create_inspector(&mut self, scope: &mut v8::HandleScope) {
+        if self.inspector.is_none() {
+            let context = self.global_context.clone().unwrap();
+            self.inspector.replace(Inspector::new(scope, context));
+        }
+    }
+
+    pub fn inspector_alloc_session(&mut self) -> i64 {
+        let inspector = &mut self.inspector.as_mut().unwrap();
+        inspector.next_session_id = inspector.next_session_id + 1;
+        return inspector.next_session_id;
+    }
+
+    pub fn inspector_ptr(&mut self) -> *mut Inspector {
+        let inspector = &mut self.inspector.as_mut().unwrap();
+        return inspector.self_ptr;
+    }
+
+    pub fn inspector_add_session(
+        &mut self,
+        session_id: i64,
+        session: Box<dyn v8::inspector::ChannelImpl>,
+        v8_session: *mut v8::inspector::V8InspectorSession,
+    ) {
+        let inspector = &mut self.inspector.as_mut().unwrap();
+        inspector.sessions.insert(session_id, session);
+        inspector.v8_sessions.insert(session_id, v8_session);
+    }
+
+    pub fn inspector_del_session(&mut self, session_id: i64) {
+        let inspector = &mut self.inspector.as_mut().unwrap();
+        inspector.sessions.remove(&session_id);
+        inspector.v8_sessions.remove(&session_id);
+    }
+
+    pub fn set_pause_resume_proxy(&mut self, pause_proxy_addr: &str, resume_proxy_addr: &str) {
+        let inspector = &mut self.inspector.as_mut().unwrap();
+        inspector.pause_proxy_addr.replace(pause_proxy_addr.to_owned());
+        inspector.resume_proxy_addr.replace(resume_proxy_addr.to_owned());
     }
 }

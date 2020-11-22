@@ -3,6 +3,7 @@ pub mod errors;
 pub mod os;
 pub mod random;
 pub mod skynet;
+pub mod inspect;
 
 use crate::error::AnyError;
 use crate::json_op_sync;

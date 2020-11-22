@@ -3,14 +3,17 @@
 use crate::error::AnyError;
 use crate::error::JsError;
 use crate::runtime::JsRuntimeState;
+pub use crate::zero_copy_buf::BufVec;
 use crate::JsRuntime;
 use crate::OpId;
 use crate::OpTable;
+use crate::ZeroCopyBuf;
 use rusty_v8 as v8;
 use std::cell::Cell;
 use std::convert::TryFrom;
 use std::option::Option;
 use url::Url;
+use v8::inspector::*;
 use v8::MapFnTo;
 
 lazy_static! {
@@ -53,6 +56,9 @@ lazy_static! {
         },
         v8::ExternalReference {
             function: set_jslib_paths.map_fn_to(),
+        },
+        v8::ExternalReference {
+            function: inspector_message.map_fn_to()
         },
     ]);
 }
@@ -137,6 +143,15 @@ pub fn initialize_context<'s>(scope: &mut v8::HandleScope<'s, ()>) -> v8::Local<
     let send_tmpl = v8::FunctionTemplate::new(scope, send);
     let send_val = send_tmpl.get_function(scope).unwrap();
     core_val.set(scope, send_key.into(), send_val.into());
+
+    let inspector_message_key = v8::String::new(scope, "inspector_message").unwrap();
+    let inspector_message_tmpl = v8::FunctionTemplate::new(scope, inspector_message);
+    let inspector_message_val = inspector_message_tmpl.get_function(scope).unwrap();
+    core_val.set(
+        scope,
+        inspector_message_key.into(),
+        inspector_message_val.into(),
+    );
 
     let set_macrotask_callback_key = v8::String::new(scope, "setMacrotaskCallback").unwrap();
     let set_macrotask_callback_tmpl = v8::FunctionTemplate::new(scope, set_macrotask_callback);
@@ -396,6 +411,63 @@ fn send<'s>(
     };
 
     OpTable::route_op(op_id, state.op_state.clone(), &mut state, scope, args, rv);
+}
+
+fn inspector_message<'s>(
+    scope: &mut v8::HandleScope<'s>,
+    args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue,
+) {
+    let mut v8_session: *mut v8::inspector::V8InspectorSession = std::ptr::null_mut();
+    let mut buf = Vec::new();
+    {
+        let state_rc = JsRuntime::state(scope);
+        let mut s = state_rc.borrow_mut();
+
+        let session_id =
+            match v8::Local::<v8::Integer>::try_from(args.get(0)).map_err(AnyError::from) {
+                Ok(op_id) => op_id.value(),
+                Err(err) => {
+                    let msg = format!("invalid session_id : {}", err);
+                    let msg = v8::String::new(scope, &msg).unwrap();
+                    let exc = v8::Exception::type_error(scope, msg);
+                    scope.throw_exception(exc);
+                    return;
+                }
+            };
+
+        let buf_iter = (1..args.length()).map(|idx| {
+            v8::Local::<v8::ArrayBufferView>::try_from(args.get(idx))
+                .map(|view| ZeroCopyBuf::new(scope, view))
+                .map_err(|err| {
+                    let msg = format!("Invalid argument at position {}: {}", idx, err);
+                    let msg = v8::String::new(scope, &msg).unwrap();
+                    v8::Exception::type_error(scope, msg)
+                })
+        });
+
+        let bufs: BufVec = match buf_iter.collect::<Result<_, _>>() {
+            Ok(bufs) => bufs,
+            Err(exc) => {
+                scope.throw_exception(exc);
+                return;
+            }
+        };
+
+        s.create_inspector(scope);
+        let v8inspector = &mut s.inspector.as_mut().unwrap().v8_sessions;
+        if let Some(session) = v8inspector.get_mut(&session_id) {
+            let b = &bufs[0] as &[u8];
+            buf.resize(b.len(), 0);
+            buf[0..b.len()].copy_from_slice(b);
+
+            v8_session = *session;
+        }
+    }
+
+    unsafe {
+        (*(v8_session)).dispatch_protocol_message(StringView::from(&buf[..]));
+    }
 }
 
 fn set_macrotask_callback(

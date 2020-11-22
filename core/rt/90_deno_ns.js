@@ -81,6 +81,7 @@ __bootstrap.denoNs = {
   connectTls: __bootstrap.tls.connectTls,
   listenTls: __bootstrap.tls.listenTls,
   skynet: __bootstrap.skynet,
+  v8inspect: __bootstrap.v8inspect,
   exists_file: __bootstrap.os.exists_file,
 };
 

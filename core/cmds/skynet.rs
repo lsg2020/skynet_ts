@@ -9,7 +9,6 @@ use crate::ZeroCopyBuf;
 use serde::Deserialize;
 use std::cell::RefCell;
 use std::rc::Rc;
-
 use rusty_v8 as v8;
 
 pub fn init(rt: &mut JsRuntime) {
@@ -50,7 +49,7 @@ pub fn op_skynet_command(
         Ok(json!({}))
     } else {
         let r = unsafe { String::from(std::ffi::CStr::from_ptr(result).to_str().unwrap()) };
-        Ok(json!({"result": r}))
+        Ok(json!({ "result": r }))
     }
 }
 
@@ -191,4 +190,3 @@ pub fn op_skynet_genid(
     let v8_session = v8::Integer::new(scope, session as i32).into();
     rv.set(v8_session);
 }
-

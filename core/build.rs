@@ -12,6 +12,7 @@ mod ops;
 mod resources;
 mod runtime;
 mod zero_copy_buf;
+mod inspector;
 
 pub use futures;
 pub use rusty_v8 as v8;
