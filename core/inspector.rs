@@ -1,4 +1,3 @@
-use curl::easy::Easy;
 use std::collections::HashMap;
 use std::mem::MaybeUninit;
 use std::ops::Deref;
@@ -124,10 +123,7 @@ impl v8::inspector::V8InspectorClientImpl for Inspector {
         if self.resume_proxy_addr.is_none() {
             return;
         }
-        let mut easy = Easy::new();
-        easy.url(self.resume_proxy_addr.as_ref().unwrap().as_str()).unwrap();
-        easy.get(true).unwrap();
-        let _r = easy.transfer().perform();
+        let _ = reqwest::blocking::get(self.resume_proxy_addr.as_ref().unwrap().as_str());
     }
 
     fn run_if_waiting_for_debugger(&mut self, _context_group_id: i32) {}
