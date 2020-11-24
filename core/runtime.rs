@@ -764,7 +764,7 @@ impl JsRuntime {
                 ModuleSource {
                     code: source,
                     module_url_specified: file_path.clone(),
-                    module_url_found: file_path.clone(),
+                    module_url_found: "file://".to_owned() + &file_path.to_owned(),
                 },
                 import_specifiers,
             )?;
