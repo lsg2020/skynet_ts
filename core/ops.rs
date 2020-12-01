@@ -223,3 +223,21 @@ fn json_serialize_op_result(
     };
     serde_json::to_vec(&value).unwrap().into_boxed_slice()
 }
+
+#[macro_export]
+macro_rules! get_args {
+    ($scope: expr, $type: ty, $args: expr, $index: expr) => {
+        {
+            match v8::Local::<$type>::try_from($args.get($index)).map_err(AnyError::from) {
+                Ok(v) => v,
+                Err(err) => {
+                    let msg = format!("invalid argument at position {}: {}", $index, err);
+                    let msg = v8::String::new($scope, &msg).unwrap();
+                    let exc = v8::Exception::type_error($scope, msg);
+                    $scope.throw_exception(exc);
+                    return;
+                }
+            }
+        }
+    };
+}

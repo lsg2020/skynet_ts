@@ -19,6 +19,7 @@ pub fn init(rt: &mut JsRuntime) {
     //super::reg_json_sync(rt, "op_skynet_now", op_skynet_now);
     rt.register_op("op_skynet_now", op_skynet_now_raw);
     rt.register_op("op_skynet_genid", op_skynet_genid);
+    rt.register_op("op_skynet_fetch_message", op_skynet_fetch_message);
 }
 
 #[derive(Deserialize)]
@@ -189,4 +190,26 @@ pub fn op_skynet_genid(
 
     let v8_session = v8::Integer::new(scope, session as i32).into();
     rv.set(v8_session);
+}
+
+use std::convert::TryFrom;
+pub fn op_skynet_fetch_message(
+    _state: Rc<RefCell<OpState>>,
+    _s: &mut JsRuntimeState,
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let msg = crate::get_args!(scope, v8::BigInt, args, 1).u64_value().0;
+    let sz = crate::get_args!(scope, v8::Integer, args, 2).value() as libc::size_t;
+    let buffer = crate::get_args!(scope, v8::ArrayBuffer, args, 3);
+    let buffer = v8::ArrayBuffer::get_backing_store(&buffer);
+
+    if sz > 0 {
+        let buf = unsafe { crate::bindings::get_backing_store_slice_mut(&buffer, 0, buffer.byte_length()) };
+        buf[0..sz].copy_from_slice(unsafe { std::slice::from_raw_parts(msg as *const u8, sz) });
+    }
+
+    let v8_sz = v8::Integer::new(scope, sz as i32).into();
+    rv.set(v8_sz);
 }

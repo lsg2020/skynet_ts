@@ -14,7 +14,7 @@ mod cmds;
 pub mod error;
 mod gotham_state;
 mod modules;
-mod ops;
+pub mod ops;
 mod resources;
 mod runtime;
 mod zero_copy_buf;

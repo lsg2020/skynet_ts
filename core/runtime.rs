@@ -430,9 +430,6 @@ pub(crate) fn exception_to_err_result<'s, T>(
     Err(js_error)
 }
 
-const SHARED_MIN_SZ: usize = 128;
-const SHARED_MAX_SZ: usize = 64 * 1024;
-
 // Related to module loading
 impl JsRuntime {
     /// Low-level module creation.
@@ -841,7 +838,7 @@ impl JsRuntime {
     ) -> Result<bool, AnyError> {
         {
             let state_rc = Self::state(self.v8_isolate());
-            let mut state = state_rc.borrow_mut();
+            let state = state_rc.borrow_mut();
 
             let scope = &mut v8::HandleScope::new(self.v8_isolate());
             let context = state
@@ -851,47 +848,10 @@ impl JsRuntime {
                 .unwrap();
             let scope = &mut v8::ContextScope::new(scope, context);
 
-            let shared_bs = &state.shared_bs;
-
-            let mut new_bs = false;
-            let bs = match shared_bs {
-                Some(bs) if bs.byte_length() >= sz => bs,
-                _ => {
-                    let mut alloc_sz = SHARED_MIN_SZ;
-                    if let Some(bs) = shared_bs {
-                        alloc_sz = if bs.byte_length() > 0 {
-                            bs.byte_length() * 2
-                        } else {
-                            SHARED_MIN_SZ
-                        };
-                    }
-                    alloc_sz = ((sz as f64 / alloc_sz as f64).ceil() * alloc_sz as f64) as usize;
-                    if alloc_sz >= SHARED_MAX_SZ {
-                        alloc_sz = ((sz as f64 / SHARED_MIN_SZ as f64).ceil()
-                            * SHARED_MIN_SZ as f64) as usize;
-                    } else if alloc_sz < SHARED_MIN_SZ {
-                        alloc_sz = SHARED_MIN_SZ;
-                    }
-
-                    //let mut buf = Vec::new();
-                    //buf.resize(alloc_sz, 0);
-                    //let bs = v8::SharedArrayBuffer::new_backing_store_from_boxed_slice(buf.into_boxed_slice(),);
-                    let bs = v8::SharedArrayBuffer::new_backing_store(scope, alloc_sz);
-                    new_bs = true;
-
-                    state.shared_bs = Some(bs.make_shared());
-                    state.shared_bs.as_ref().unwrap()
-                }
-            };
-            if sz > 0 {
-                let buf = unsafe { bindings::get_backing_store_slice_mut(bs, 0, bs.byte_length()) };
-                buf[0..sz].copy_from_slice(unsafe { std::slice::from_raw_parts(msg, sz) });
-            }
-
             let tc_scope = &mut v8::TryCatch::new(scope);
             let global = context.global(tc_scope).into();
+            let v8_msg = v8::BigInt::new_from_u64(tc_scope, msg as u64).into();
             let v8_sz = v8::Integer::new(tc_scope, sz as i32).into();
-            let v8_new = v8::Boolean::new(tc_scope, new_bs).into();
 
             let v8_stype = v8::Integer::new(tc_scope, stype as i32).into();
             let v8_session = v8::Integer::new(tc_scope, session as i32).into();
@@ -906,7 +866,7 @@ impl JsRuntime {
             js_recv_cb.call(
                 tc_scope,
                 global,
-                &[v8_stype, v8_session, v8_source, v8_sz, v8_new],
+                &[v8_stype, v8_session, v8_source, v8_msg, v8_sz],
             );
         }
 

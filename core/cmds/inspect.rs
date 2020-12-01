@@ -130,52 +130,11 @@ pub fn op_v8inspector_connect(
 ) {
     let state = &mut state.borrow_mut();
 
-    let proxy_addr = match v8::Local::<v8::Integer>::try_from(args.get(1)).map_err(AnyError::from) {
-        Ok(op_id) => op_id.value(),
-        Err(err) => {
-            let msg = format!("invalid proxy_addr: {}", err);
-            let msg = v8::String::new(scope, &msg).unwrap();
-            let exc = v8::Exception::type_error(scope, msg);
-            scope.throw_exception(exc);
-            return;
-        }
-    };
+    let proxy_addr = crate::get_args!(scope, v8::Integer, args, 1).value();
+    let proxy_ptype = crate::get_args!(scope, v8::Integer, args, 2).value();
+    let pause_proxy_addr = crate::get_args!(scope, v8::String, args, 3).to_rust_string_lossy(scope);
+    let resume_proxy_addr = crate::get_args!(scope, v8::String, args, 4).to_rust_string_lossy(scope);
 
-    let proxy_ptype = match v8::Local::<v8::Integer>::try_from(args.get(2)).map_err(AnyError::from)
-    {
-        Ok(op_id) => op_id.value(),
-        Err(err) => {
-            let msg = format!("invalid proxy_ptype: {}", err);
-            let msg = v8::String::new(scope, &msg).unwrap();
-            let exc = v8::Exception::type_error(scope, msg);
-            scope.throw_exception(exc);
-            return;
-        }
-    };
-
-    let pause_proxy_addr =
-        match v8::Local::<v8::String>::try_from(args.get(3)).map_err(AnyError::from) {
-            Ok(v) => v.to_rust_string_lossy(scope),
-            Err(err) => {
-                let msg = format!("invalid pause_proxy_addr: {}", err);
-                let msg = v8::String::new(scope, &msg).unwrap();
-                let exc = v8::Exception::type_error(scope, msg);
-                scope.throw_exception(exc);
-                return;
-            }
-        };
-
-    let resume_proxy_addr =
-        match v8::Local::<v8::String>::try_from(args.get(4)).map_err(AnyError::from) {
-            Ok(v) => v.to_rust_string_lossy(scope),
-            Err(err) => {
-                let msg = format!("invalid resume_proxy_addr: {}", err);
-                let msg = v8::String::new(scope, &msg).unwrap();
-                let exc = v8::Exception::type_error(scope, msg);
-                scope.throw_exception(exc);
-                return;
-            }
-        };
 
     s.create_inspector(scope);
     s.set_pause_resume_proxy(pause_proxy_addr.as_str(), resume_proxy_addr.as_str());
@@ -204,16 +163,7 @@ pub fn op_v8inspector_disconnect(
     args: v8::FunctionCallbackArguments,
     _rv: v8::ReturnValue,
 ) {
-    let session_id = match v8::Local::<v8::Integer>::try_from(args.get(1)).map_err(AnyError::from) {
-        Ok(op_id) => op_id.value(),
-        Err(err) => {
-            let msg = format!("invalid op id: {}", err);
-            let msg = v8::String::new(scope, &msg).unwrap();
-            let exc = v8::Exception::type_error(scope, msg);
-            scope.throw_exception(exc);
-            return;
-        }
-    };
+    let session_id = crate::get_args!(scope, v8::Integer, args, 1).value();
 
     s.create_inspector(scope);
     s.inspector_del_session(session_id);

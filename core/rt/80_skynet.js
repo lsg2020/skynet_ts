@@ -60,7 +60,7 @@
 
     function now() {
         let r = core.rawOpSync("op_skynet_now");
-        return r
+        return r;
     }
 
     function error(err) {
@@ -75,6 +75,11 @@
         return core.rawOpSync("op_skynet_genid");
     }
 
+    function fetch_message(msg, sz, buffer) {
+        let len = core.rawOpSync("op_skynet_fetch_message", msg, sz, buffer);
+        return len;
+    }
+
     window.__bootstrap.skynet = {
         command,
         get_env,
@@ -86,5 +91,6 @@
         addresscommand,
         intcommand,
         genid,
+        fetch_message,
     };
 })(this);

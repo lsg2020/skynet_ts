@@ -8,7 +8,8 @@ mod bindings;
 pub mod error;
 mod gotham_state;
 mod modules;
-mod ops;
+#[macro_use]
+pub mod ops;
 mod resources;
 mod runtime;
 mod zero_copy_buf;

@@ -424,18 +424,7 @@ fn inspector_message<'s>(
         let state_rc = JsRuntime::state(scope);
         let mut s = state_rc.borrow_mut();
 
-        let session_id =
-            match v8::Local::<v8::Integer>::try_from(args.get(0)).map_err(AnyError::from) {
-                Ok(op_id) => op_id.value(),
-                Err(err) => {
-                    let msg = format!("invalid session_id : {}", err);
-                    let msg = v8::String::new(scope, &msg).unwrap();
-                    let exc = v8::Exception::type_error(scope, msg);
-                    scope.throw_exception(exc);
-                    return;
-                }
-            };
-
+        let session_id = crate::get_args!(scope, v8::Integer, args, 0).value();
         let buf_iter = (1..args.length()).map(|idx| {
             v8::Local::<v8::ArrayBufferView>::try_from(args.get(idx))
                 .map(|view| ZeroCopyBuf::new(scope, view))
@@ -842,15 +831,7 @@ fn set_jslib_paths(
     args: v8::FunctionCallbackArguments,
     mut _rv: v8::ReturnValue,
 ) {
-    let search_paths = match v8::Local::<v8::String>::try_from(args.get(0)) {
-        Ok(val) => val,
-        Err(_) => {
-            let msg = v8::String::new(scope, "Invalid argument").unwrap();
-            let exception = v8::Exception::type_error(scope, msg);
-            scope.throw_exception(exception);
-            return;
-        }
-    };
+    let search_paths = crate::get_args!(scope, v8::String, args, 0);
 
     let state_rc = JsRuntime::state(scope);
     let mut state = state_rc.borrow_mut();
