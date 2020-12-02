@@ -80,6 +80,42 @@
         return len;
     }
 
+    function socket_connect(addr, port) {
+        return core.rawOpSync("op_skynet_socket_connect", addr, port);
+    }
+
+    function socket_close(id) {
+        core.rawOpSync("op_skynet_socket_close", id);
+    }
+
+    function socket_shutdown(id) {
+        core.rawOpSync("op_skynet_socket_shutdown", id);
+    }
+
+    function socket_unpack(msg, sz) {
+        return core.rawOpSync("op_skynet_socket_unpack", msg, sz);
+    }
+
+    function socket_bind(fd) {
+        return core.rawOpSync("op_skynet_socket_bind", fd);
+    }
+
+    function socket_start(id) {
+        core.rawOpSync("op_skynet_socket_start", id);
+    }
+
+    function socket_listen(host, port, backlog) {
+        return core.rawOpSync("op_skynet_socket_listen", host, port, backlog);
+    }
+
+    function socket_udp(host, port) {
+        return core.rawOpSync("op_skynet_socket_udp", host, port);
+    }
+
+    function socket_udp_connect(id, host, port) {
+        core.rawOpSync("op_skynet_socket_udp_connect", id, host, port);
+    }
+
     window.__bootstrap.skynet = {
         command,
         get_env,
@@ -92,5 +128,14 @@
         intcommand,
         genid,
         fetch_message,
+        socket_connect,
+        socket_close,
+        socket_shutdown,
+        socket_unpack,
+        socket_bind,
+        socket_start,
+        socket_listen,
+        socket_udp,
+        socket_udp_connect,
     };
 })(this);

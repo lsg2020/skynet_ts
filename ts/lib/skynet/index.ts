@@ -1,4 +1,4 @@
-let skynet_rt = Deno.skynet
+let skynet_rt = Deno.skynet;
 
 let proto = new Map<string|number, PROTOCOL_TYPE>();
 export let PTYPE_ID = {
@@ -23,6 +23,7 @@ export let PTYPE_NAME = {
     RESPONSE: "response",
     ERROR: "error",
     DEBUG: "debug",
+    SOCKET: "socket",
 }
 
 type PROTOCOL_TYPE = {
@@ -47,11 +48,11 @@ let watching_response = new Map<number, SERVICE_ADDR>();     // session -> addr
 let watching_request = new Map<number, SERVICE_ADDR>();     // session -> addr
 let unresponse = new Map<Function, SERVICE_ADDR>();   // call session -> [addr, reject]
 let sleep_session = new Map<number, number>();  // token -> session
-let next_dispatch_id = 0;
+let next_dispatch_id = 1;
 
 type UNKNOWN_REQUEST_FUNC = (session: number, source: number, msg: bigint, sz: number, prototype: number) => void;
 let _unknow_request: UNKNOWN_REQUEST_FUNC = function (session: number, source: number, msg: bigint, sz: number, prototype: number) {
-    skynet_rt.error(`Unknown request (${prototype}): ${string_unpack(msg, sz)}`);
+    skynet_rt.error(`Unknown request (${prototype}): ${sz}`);
     throw new Error(`Unknown session : ${session} from ${source.toString(16)}`);
 }
 export function dispatch_unknown_request(unknown: UNKNOWN_REQUEST_FUNC) {
@@ -61,7 +62,7 @@ export function dispatch_unknown_request(unknown: UNKNOWN_REQUEST_FUNC) {
 }
 type UNKNOWN_RESPONSE_FUNC = (session: number, source: number, msg: bigint, sz: number) => void;
 let _unknow_response: UNKNOWN_RESPONSE_FUNC = function (session: number, source: number, msg: bigint, sz: number) {
-    skynet_rt.error(`Response message : ${string_unpack(msg, sz)}`);
+    skynet_rt.error(`Response message : ${sz}`);
     throw new Error(`Unknown session : ${session} from ${source.toString(16)}`);
 }
 export function dispatch_unknown_response(unknown: UNKNOWN_RESPONSE_FUNC) {
@@ -123,6 +124,13 @@ export function fetch_message(msg: bigint, sz: number): Uint8Array {
     return shared_bytes;
 }
 
+export function gen_token() {
+    let token = next_dispatch_id++;
+    if (token >= 0xffffffff) {
+        next_dispatch_id = 1;
+    }
+    return token;
+}
 async function dispatch_message(prototype: number, session: number, source: number, msg: bigint, sz: number) {
     if (prototype == PTYPE_ID.RESPONSE) {
         let response_func = session_id_callback.get(session);
@@ -144,7 +152,7 @@ async function dispatch_message(prototype: number, session: number, source: numb
             proto: p,
             session,
             source,
-            dispatch_id: next_dispatch_id++,
+            dispatch_id: gen_token(),
         }
         if (session) { watching_response.set(session, source); }
         await p.dispatch!(context, ...p.unpack!(msg, sz));
@@ -381,6 +389,7 @@ export function assert(cond: any, msg?: string) {
         let err = msg ? new Error(`assert failed ${cond} ${msg}`) : new Error(`assert failed ${cond}`);
         throw err;
     }
+    return cond;
 }
 
 export function string_unpack(msg: bigint, sz: number) {

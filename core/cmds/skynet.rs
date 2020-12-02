@@ -20,6 +20,16 @@ pub fn init(rt: &mut JsRuntime) {
     rt.register_op("op_skynet_now", op_skynet_now_raw);
     rt.register_op("op_skynet_genid", op_skynet_genid);
     rt.register_op("op_skynet_fetch_message", op_skynet_fetch_message);
+    rt.register_op("op_skynet_socket_connect", op_skynet_socket_connect);
+    rt.register_op("op_skynet_socket_close", op_skynet_socket_close);
+    rt.register_op("op_skynet_socket_shutdown", op_skynet_socket_shutdown);
+    rt.register_op("op_skynet_socket_unpack", op_skynet_socket_unpack);
+    rt.register_op("op_skynet_socket_bind", op_skynet_socket_bind);
+    rt.register_op("op_skynet_socket_start", op_skynet_socket_start);
+    rt.register_op("op_skynet_socket_listen", op_skynet_socket_listen);
+    rt.register_op("op_skynet_socket_udp", op_skynet_socket_udp);
+    rt.register_op("op_skynet_socket_udp_connect", op_skynet_socket_udp_connect);
+
 }
 
 #[derive(Deserialize)]
@@ -212,4 +222,219 @@ pub fn op_skynet_fetch_message(
 
     let v8_sz = v8::Integer::new(scope, sz as i32).into();
     rv.set(v8_sz);
+}
+
+pub fn op_skynet_socket_connect(
+    state: Rc<RefCell<OpState>>,
+    _s: &mut JsRuntimeState,
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let state = &mut state.borrow();
+
+    let addr = crate::get_args!(scope, v8::String, args, 1).to_rust_string_lossy(scope);
+    let port = crate::get_args!(scope, v8::Integer, args, 2).value();
+
+    let id = unsafe {
+        crate::skynet_socket_connect(
+            state.skynet,
+            std::ffi::CString::new(addr).unwrap().as_ptr(),
+            port as libc::c_int,
+        )
+    };
+
+    let v8_ret = v8::Integer::new(scope, id as i32).into();
+    rv.set(v8_ret);
+}
+
+pub fn op_skynet_socket_close(
+    state: Rc<RefCell<OpState>>,
+    _s: &mut JsRuntimeState,
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue, 
+) {
+    let state = &mut state.borrow();
+    let socket_id = crate::get_args!(scope, v8::Integer, args, 1).value();
+    unsafe { crate::skynet_socket_close(state.skynet, socket_id as i32); };
+}
+
+pub fn op_skynet_socket_shutdown(
+    state: Rc<RefCell<OpState>>,
+    _s: &mut JsRuntimeState,
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue, 
+) {
+    let state = &mut state.borrow();
+    let socket_id = crate::get_args!(scope, v8::Integer, args, 1).value();
+    unsafe { crate::skynet_socket_shutdown(state.skynet, socket_id as i32); };
+}
+
+pub fn op_skynet_socket_unpack(
+    _state: Rc<RefCell<OpState>>,
+    _s: &mut JsRuntimeState,
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let msg = crate::get_args!(scope, v8::BigInt, args, 1).u64_value().0;
+    let sz = crate::get_args!(scope, v8::Integer, args, 2).value() as u64;
+
+    let socket_message = unsafe { &mut *(msg as *mut crate::skynet_socket_message) };
+
+    let mut rv_len = 4;
+    if socket_message.msg_type == crate::SKYNET_SOCKET_TYPE_UDP {
+        rv_len = 5;
+    }
+
+    let msg_type = v8::Integer::new(scope, socket_message.msg_type).into();
+    let id = v8::Integer::new(scope, socket_message.id).into();
+    let ud = v8::Integer::new(scope, socket_message.ud).into();
+
+    let v8_ret = v8::Array::new(scope, rv_len);
+    v8_ret.set_index(scope, 0, msg_type);
+    v8_ret.set_index(scope, 1, id);
+    v8_ret.set_index(scope, 2, ud);
+    if socket_message.buffer == std::ptr::null() {
+        let data;
+        if sz <= crate::SKYNET_SOCKET_MESSAGE_SIZE {
+            data = v8::String::new(scope, "").unwrap().into();
+        } else {
+            data = v8::String::new_from_utf8(scope, unsafe { std::slice::from_raw_parts((msg + crate::SKYNET_SOCKET_MESSAGE_SIZE) as *const u8, (sz - crate::SKYNET_SOCKET_MESSAGE_SIZE) as usize) }, v8::NewStringType::Normal).unwrap().into();
+        }
+        v8_ret.set_index(scope, 3, data);
+    } else {
+        let data = v8::BigInt::new_from_u64(scope, socket_message.buffer as u64).into();
+        v8_ret.set_index(scope, 3, data);
+    }
+
+    if socket_message.msg_type == crate::SKYNET_SOCKET_TYPE_UDP {
+        let mut addrsz: libc::c_int = 0;
+        let addrstring = unsafe { crate::skynet_socket_udp_address(msg as *mut crate::skynet_socket_message, &mut addrsz) };
+        let data;
+        if addrstring == std::ptr::null() {
+            data = v8::String::new(scope, "").unwrap().into();
+        } else {
+            data = v8::String::new_from_utf8(scope, unsafe { std::slice::from_raw_parts(addrstring as *const u8, addrsz as usize) }, v8::NewStringType::Normal).unwrap().into();
+        }
+        v8_ret.set_index(scope, 4, data);
+    }
+    rv.set(v8_ret.into());
+}
+
+pub fn op_skynet_socket_bind(
+    state: Rc<RefCell<OpState>>,
+    _s: &mut JsRuntimeState,
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let state = &mut state.borrow();
+
+    let fd = crate::get_args!(scope, v8::Integer, args, 1).value();
+
+    let id = unsafe {
+        crate::skynet_socket_bind(
+            state.skynet,
+            fd as libc::c_int,
+        )
+    };
+
+    let v8_ret = v8::Integer::new(scope, id as i32).into();
+    rv.set(v8_ret);
+}
+
+pub fn op_skynet_socket_start(
+    state: Rc<RefCell<OpState>>,
+    _s: &mut JsRuntimeState,
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue,
+) {
+    let state = &mut state.borrow();
+
+    let id = crate::get_args!(scope, v8::Integer, args, 1).value();
+
+    unsafe {
+        crate::skynet_socket_start(
+            state.skynet,
+            id as libc::c_int,
+        )
+    };
+}
+
+pub fn op_skynet_socket_listen(
+    state: Rc<RefCell<OpState>>,
+    _s: &mut JsRuntimeState,
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let state = &mut state.borrow();
+
+    let host = crate::get_args!(scope, v8::String, args, 1).to_rust_string_lossy(scope);
+    let port = crate::get_args!(scope, v8::Integer, args, 2).value();
+    let backlog = crate::get_args!(scope, v8::Integer, args, 3).value();
+
+    let id = unsafe {
+        crate::skynet_socket_listen(
+            state.skynet,
+            std::ffi::CString::new(host).unwrap().as_ptr(),
+            port as libc::c_int,
+            backlog as libc::c_int,
+        )
+    };
+
+    let v8_ret = v8::Integer::new(scope, id as i32).into();
+    rv.set(v8_ret);
+}
+
+
+pub fn op_skynet_socket_udp(
+    state: Rc<RefCell<OpState>>,
+    _s: &mut JsRuntimeState,
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let state = &mut state.borrow();
+
+    let host = crate::get_args!(scope, v8::String, args, 1).to_rust_string_lossy(scope);
+    let port = crate::get_args!(scope, v8::Integer, args, 2).value();
+
+    let id = unsafe {
+        crate::skynet_socket_udp(
+            state.skynet,
+            std::ffi::CString::new(host).unwrap().as_ptr(),
+            port as libc::c_int,
+        )
+    };
+
+    let v8_ret = v8::Integer::new(scope, id as i32).into();
+    rv.set(v8_ret);
+}
+
+pub fn op_skynet_socket_udp_connect(
+    state: Rc<RefCell<OpState>>,
+    _s: &mut JsRuntimeState,
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue,
+) {
+    let state = &mut state.borrow();
+
+    let id = crate::get_args!(scope, v8::Integer, args, 1).value();
+    let host = crate::get_args!(scope, v8::String, args, 2).to_rust_string_lossy(scope);
+    let port = crate::get_args!(scope, v8::Integer, args, 3).value();
+
+    unsafe {
+        crate::skynet_socket_udp_connect(
+            state.skynet,
+            id as libc::c_int,
+            std::ffi::CString::new(host).unwrap().as_ptr(),
+            port as libc::c_int,
+        )
+    };
 }
