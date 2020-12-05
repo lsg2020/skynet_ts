@@ -105,7 +105,7 @@ function _error_dispatch(error_session: number, error_source: SERVICE_ADDR) {
 const SHARED_MIN_SZ = 128;
 const SHARED_MAX_SZ = 64 * 1024;
 let shared_bytes: Uint8Array;
-export function fetch_message(msg: bigint, sz: number): Uint8Array {
+export function fetch_message(msg: bigint, sz: number, offset: number = 0, init: boolean = false): Uint8Array {
     if (!shared_bytes || shared_bytes.length < sz) {
         let alloc_sz = SHARED_MIN_SZ;
         if (shared_bytes) {
@@ -119,8 +119,8 @@ export function fetch_message(msg: bigint, sz: number): Uint8Array {
         }
         shared_bytes = new Uint8Array(alloc_sz);
     }
-    if (sz > 0)
-        sz = Deno.skynet.fetch_message(msg, sz, shared_bytes.buffer);
+    if (!init && sz > 0)
+        sz = Deno.skynet.fetch_message(msg, sz, shared_bytes.buffer, offset);
     return shared_bytes;
 }
 

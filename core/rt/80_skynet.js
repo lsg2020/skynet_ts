@@ -75,9 +75,13 @@
         return core.rawOpSync("op_skynet_genid");
     }
 
-    function fetch_message(msg, sz, buffer) {
-        let len = core.rawOpSync("op_skynet_fetch_message", msg, sz, buffer);
+    function fetch_message(msg, sz, buffer, offset) {
+        let len = core.rawOpSync("op_skynet_fetch_message", msg, sz, buffer, offset);
         return len;
+    }
+
+    function free(msg) {
+        core.rawOpSync("op_skynet_free", msg);
     }
 
     function socket_connect(addr, port) {
@@ -128,6 +132,7 @@
         intcommand,
         genid,
         fetch_message,
+        free,
         socket_connect,
         socket_close,
         socket_shutdown,
