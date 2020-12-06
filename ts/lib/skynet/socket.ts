@@ -11,6 +11,7 @@ type SOCKET_ID = number;
 type SOCKET_UDP_RECV = (data: Uint8Array, sz: number, address: string) => void;
 type SOCKET_ACCEPT_CB = (accept_id: SOCKET_ID, address: string) => void;
 type SOCKET_WARNING_CB = (id: SOCKET_ID, size: number) => void;
+type MSGPTR = bigint;
 type SOCKET = {
     protocol: PROTOCOL_TYPE,
     id: SOCKET_ID,
@@ -19,7 +20,7 @@ type SOCKET = {
     connected: boolean,
     connecting: boolean,
     error?: string,
-    read_required?: string|number|boolean,
+    read_required?: Uint8Array|number|boolean,
     read_required_skip?: number,
     suspend_token: number,
     callback?: SOCKET_ACCEPT_CB|SOCKET_UDP_RECV,
@@ -283,9 +284,10 @@ export async function readall(id: SOCKET_ID) {
 }
 
 export async function readline(id: SOCKET_ID, sep: string = '\n'): Promise<[boolean, Uint8Array?, number?]> {
+    let sep_buffer = new TextEncoder().encode(sep);
     let s = socket_pool.get(id)!;
     skynet.assert(s);
-    let ret = _read_line(s, false, sep) as [Uint8Array, number];
+    let ret = _read_line(s, false, sep_buffer) as [Uint8Array, number];
     if (ret) {
         return [true, ...ret];
     }
@@ -294,18 +296,56 @@ export async function readline(id: SOCKET_ID, sep: string = '\n'): Promise<[bool
         return [false, ..._read_all(s.buffer!)];
     }
     skynet.assert(!s.read_required_skip);
-    s.read_required = sep;
+    s.read_required = sep_buffer;
     await suspend(s);
     if (s.connected) {
-        return [true, ..._read_line(s, false, sep) as [Uint8Array, number]];
+        return [true, ..._read_line(s, false, sep_buffer) as [Uint8Array, number]];
     } else {
         return [false, ..._read_all(s.buffer!)];
     }
 }
 
+let text_encoder = new TextEncoder();
+function get_buffer(buffer: MSGPTR|Uint8Array[]|string, sz?: number): [MSGPTR, number] {
+    let t = typeof(buffer);
+    if (t == "bigint") {
+        return [buffer as MSGPTR, sz!];
+    } else if (t == "string") {
+        return skynet_rt.socket_alloc_msg(text_encoder.encode(buffer as string));
+    } else {
+        return skynet_rt.socket_alloc_msg(...(buffer as Uint8Array[]));
+    }
+}
+
+export function write(id: SOCKET_ID, buffer: MSGPTR): boolean;
+export function write(id: SOCKET_ID, buffer: Uint8Array[]): boolean;
+export function write(id: SOCKET_ID, buffer: string): boolean;
+export function write(id: SOCKET_ID, buffer: MSGPTR|Uint8Array[]|string, sz?: number): boolean {
+    let [msg, len] = get_buffer(buffer, sz);
+    let err = skynet_rt.socket_send(id, msg, len);
+    return !err;
+}
+
+export function lwrite(id: SOCKET_ID, buffer: MSGPTR): boolean;
+export function lwrite(id: SOCKET_ID, buffer: Uint8Array[]): boolean;
+export function lwrite(id: SOCKET_ID, buffer: string): boolean;
+export function lwrite(id: SOCKET_ID, buffer: MSGPTR|Uint8Array[]|string, sz?: number): boolean {
+    let [msg, len] = get_buffer(buffer, sz);
+    let err = skynet_rt.socket_send_lowpriority(id, msg, len);
+    return !err;
+}
+
+export function sendto(id: SOCKET_ID, address: string, buffer: MSGPTR): boolean;
+export function sendto(id: SOCKET_ID, address: string, buffer: Uint8Array[]): boolean;
+export function sendto(id: SOCKET_ID, address: string, buffer: string): boolean;
+export function sendto(id: SOCKET_ID, address: string, buffer: MSGPTR|Uint8Array[]|string, sz?: number): boolean {
+    let [msg, len] = get_buffer(buffer, sz);
+    let err = skynet_rt.socket_sendto(id, address, msg, len);
+    return !err;
+}
 
 type BUFFER_NODE = {
-    msg: bigint,
+    msg: MSGPTR,
     sz: number,
     next?: BUFFER_NODE,
 }
@@ -328,7 +368,7 @@ const SKYNET_SOCKET_TYPE_ACCEPT = 4;
 const SKYNET_SOCKET_TYPE_ERROR = 5;
 const SKYNET_SOCKET_TYPE_UDP = 6;
 const SKYNET_SOCKET_TYPE_WARNING = 7;
-socket_message[SKYNET_SOCKET_TYPE_DATA] = (id: SOCKET_ID, size: number, data: bigint) => {
+socket_message[SKYNET_SOCKET_TYPE_DATA] = (id: SOCKET_ID, size: number, data: MSGPTR) => {
     let s = socket_pool.get(id);
     if (!s) {
         skynet.error(`socket: drop package from ${id}`);
@@ -352,7 +392,7 @@ socket_message[SKYNET_SOCKET_TYPE_DATA] = (id: SOCKET_ID, size: number, data: bi
             return;
         }
 
-        if (rrt == "string" && _read_line(s, true, rr as string)) {
+        if (rr instanceof Uint8Array && _read_line(s, true, rr as Uint8Array)) {
             // read line
             s.read_required = undefined;
             s.read_required_skip = undefined;
@@ -402,7 +442,7 @@ socket_message[SKYNET_SOCKET_TYPE_ERROR] = (id: SOCKET_ID, _ud: number, err: str
     _shutdown(id);
     wakeup(s)
 }
-socket_message[SKYNET_SOCKET_TYPE_UDP] = (id: SOCKET_ID, size: number, data: bigint, address: string) => {
+socket_message[SKYNET_SOCKET_TYPE_UDP] = (id: SOCKET_ID, size: number, data: MSGPTR, address: string) => {
     let s = socket_pool.get(id);
     if (!s || !s.callback) {
         skynet.error(`socket: drop udp package from ${id}`);
@@ -425,7 +465,7 @@ skynet.register_protocol({
     id: skynet.PTYPE_ID.SOCKET,
     name: skynet.PTYPE_NAME.SOCKET,
     unpack: skynet_rt.socket_unpack,
-    dispatch: (context: skynet.CONTEXT, type: number, id: number, ud: number, msg: string|bigint, udp_address: string) => {
+    dispatch: (context: skynet.CONTEXT, type: number, id: number, ud: number, msg: string|MSGPTR, udp_address: string) => {
         socket_message[type](id, ud, msg, udp_address);
     },
 })
@@ -447,7 +487,7 @@ async function suspend(s: SOCKET) {
 }
 
 const LARGE_PAGE_NODE=12;
-function _pack_push(sb: SOCKET_BUFFER, data: bigint, sz: number) {
+function _pack_push(sb: SOCKET_BUFFER, data: MSGPTR, sz: number) {
     let free_node = buffer_pool[0];
     if (!free_node) {
         let tsz = buffer_pool.length;
@@ -583,7 +623,7 @@ function _read_all(sb: SOCKET_BUFFER, skip: number = 0, peek: boolean = false): 
     }
     return [msg, sz];
 }
-function _read_line(s: SOCKET, check: boolean, sep: string): boolean | [Uint8Array, number] {
+function _read_line(s: SOCKET, check: boolean, sep_buffer: Uint8Array): boolean | [Uint8Array, number] {
     let sb = s.buffer;
     if (!sb) {
         throw new Error(`Need buffer object at param 1`);
@@ -593,13 +633,11 @@ function _read_line(s: SOCKET, check: boolean, sep: string): boolean | [Uint8Arr
         return false;
     }
 
-    let sep_buffer = new TextEncoder().encode(sep); // TODO
-
     let find_index = -1;
     let skip = s.read_required_skip || 0;
 
     let [msg, sz] = _read_all(sb, skip, true);
-    let check_end = (sz > sep_buffer.length ? sz - sep_buffer.length : 0);
+    let check_end = (sz >= sep_buffer.length ? sz - sep_buffer.length + 1 : 0);
     for (let i = 0; i < check_end; i++) {
         let match = true;
         for (let j=0; j<sep_buffer.length; j++) {
@@ -618,7 +656,7 @@ function _read_line(s: SOCKET, check: boolean, sep: string): boolean | [Uint8Arr
         if (find_index >= 0) {
             return true;
         } else {
-            s.read_required_skip = skip + (check_end ? check_end + 1 : 0);
+            s.read_required_skip = skip + check_end;
             return false;
         }
     } else {
@@ -660,13 +698,13 @@ function _pool_new(sz: number) {
     return pool!;
 }
 
-function _pack_drop(data: bigint, size: number) {
+function _pack_drop(data: MSGPTR, size: number) {
     skynet_rt.free(data);
 }
 function _pack_fetch_init(sz: number) {
     return skynet.fetch_message(0n, sz, 0, true);
 }
-function _pack_fetch(msg: bigint, sz: number, offset: number = 0) {
+function _pack_fetch(msg: MSGPTR, sz: number, offset: number = 0) {
     return skynet.fetch_message(msg, sz, offset);
 }
 function _close(id: SOCKET_ID) {

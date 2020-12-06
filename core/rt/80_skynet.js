@@ -120,6 +120,22 @@
         core.rawOpSync("op_skynet_socket_udp_connect", id, host, port);
     }
 
+    function socket_alloc_msg(...buffers) {
+        return core.rawOpSync("op_skynet_socket_alloc_msg", ...buffers);
+    }
+
+    function socket_send(id, msg, len) {
+        return core.rawOpSync("op_skynet_socket_send", id, msg, len);
+    }
+
+    function socket_send_lowpriority(id, msg, len) {
+        return core.rawOpSync("op_skynet_socket_send_lowpriority", id, msg, len);
+    }
+
+    function socket_sendto(id, address, msg, len) {
+        return core.rawOpSync("op_skynet_socket_sendto", id, address, msg, len);
+    }
+
     window.__bootstrap.skynet = {
         command,
         get_env,
@@ -142,5 +158,9 @@
         socket_listen,
         socket_udp,
         socket_udp_connect,
+        socket_alloc_msg,
+        socket_send,
+        socket_send_lowpriority,
+        socket_sendto,
     };
 })(this);

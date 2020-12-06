@@ -49,6 +49,14 @@ pub struct skynet_socket_message {
     buffer: *const u8,
 }
 pub const SKYNET_SOCKET_MESSAGE_SIZE: u64 = 24;
+#[repr(C)]
+pub struct socket_sendbuffer {
+    id: c_int,
+    msg_type: c_int,
+    buffer: *const u8,
+    sz: size_t,
+}
+
 extern "C" {
     pub fn skynet_send(
         skynet: *const c_void,
@@ -87,7 +95,9 @@ extern "C" {
     pub fn skynet_socket_listen(skynet: *const c_void, host: *const c_char, port: c_int, backlog: c_int) -> c_int;
     pub fn skynet_socket_udp(skynet: *const c_void, host: *const c_char, port: c_int) -> c_int;
     pub fn skynet_socket_udp_connect(skynet: *const c_void, id: c_int, host: *const c_char, port: c_int) -> c_void;
-    
+    pub fn skynet_socket_sendbuffer(skynet: *const c_void, buffer: *mut socket_sendbuffer) -> c_int;
+    pub fn skynet_socket_sendbuffer_lowpriority(skynet: *const c_void, buffer: *mut socket_sendbuffer) -> c_int;
+    pub fn skynet_socket_udp_sendbuffer(skynet: *const c_void, address: *const c_char, buffer: *mut socket_sendbuffer) -> c_int;
 }
 pub const PTYPE_TAG_DONTCOPY: c_int = 0x10000;
 pub const PTYPE_TAG_ALLOCSESSION: c_int = 0x20000;

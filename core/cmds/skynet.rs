@@ -6,6 +6,7 @@ use crate::JsRuntime;
 use crate::JsRuntimeState;
 use crate::OpState;
 use crate::ZeroCopyBuf;
+use crate::BufVec;
 use serde::Deserialize;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -30,7 +31,10 @@ pub fn init(rt: &mut JsRuntime) {
     rt.register_op("op_skynet_socket_listen", op_skynet_socket_listen);
     rt.register_op("op_skynet_socket_udp", op_skynet_socket_udp);
     rt.register_op("op_skynet_socket_udp_connect", op_skynet_socket_udp_connect);
-
+    rt.register_op("op_skynet_socket_alloc_msg", op_skynet_socket_alloc_msg);
+    rt.register_op("op_skynet_socket_send", op_skynet_socket_send);
+    rt.register_op("op_skynet_socket_send_lowpriority", op_skynet_socket_send_lowpriority);
+    rt.register_op("op_skynet_socket_sendto", op_skynet_socket_sendto);
 }
 
 #[derive(Deserialize)]
@@ -450,4 +454,146 @@ pub fn op_skynet_socket_udp_connect(
             port as libc::c_int,
         )
     };
+}
+
+pub fn op_skynet_socket_alloc_msg(
+    _state: Rc<RefCell<OpState>>,
+    _s: &mut JsRuntimeState,
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let mut sz = 0;
+    let buf_iter = (1..args.length()).map(|idx| {
+        v8::Local::<v8::ArrayBufferView>::try_from(args.get(idx))
+            .map(|view| {
+                sz += view.byte_length();
+                ZeroCopyBuf::new(scope, view)
+            })
+            .map_err(|err| {
+                let msg = format!("Invalid argument at position {}: {}", idx, err);
+                let msg = v8::String::new(scope, &msg).unwrap();
+                v8::Exception::type_error(scope, msg)
+            })
+    });
+
+    let mut bufs: BufVec = match buf_iter.collect::<Result<_, _>>() {
+        Ok(bufs) => bufs,
+        Err(exc) => {
+            scope.throw_exception(exc);
+            return;
+        }
+    };
+
+    let dest = unsafe { libc::malloc(sz) };
+    sz = 0;
+    for buf in &mut bufs {
+        let buf_sz = (buf as &[u8]).len();
+        unsafe {
+            libc::memcpy(dest.add(sz), buf.as_ptr() as *const libc::c_void, buf_sz);
+        }
+        sz += buf_sz;
+    }
+
+    let v8_dest = v8::BigInt::new_from_u64(scope, dest as u64).into();
+    let v8_sz = v8::Integer::new(scope, sz as i32).into();
+    let v8_ret = v8::Array::new(scope, 2);
+    v8_ret.set_index(scope, 0, v8_dest);
+    v8_ret.set_index(scope, 1, v8_sz);
+    rv.set(v8_ret.into());
+}
+
+pub fn op_skynet_socket_send(
+    state: Rc<RefCell<OpState>>,
+    _s: &mut JsRuntimeState,
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let state = &mut state.borrow();
+
+    let id = crate::get_args!(scope, v8::Integer, args, 1).value();
+    let msg = crate::get_args!(scope, v8::BigInt, args, 2).u64_value().0;
+    let sz = crate::get_args!(scope, v8::Integer, args, 3).value();
+
+    let mut buffer = Box::new(crate::socket_sendbuffer {
+        id: id as libc::c_int,
+        msg_type: 0 as libc::c_int,
+        buffer: msg as *const u8,
+        sz: sz as libc::size_t,
+    });
+
+    let err = unsafe {
+        crate::skynet_socket_sendbuffer(
+            state.skynet,
+            &mut *buffer,
+        )
+    };
+
+    let v8_ret = v8::Integer::new(scope, err as i32).into();
+    rv.set(v8_ret);
+}
+
+pub fn op_skynet_socket_send_lowpriority(
+    state: Rc<RefCell<OpState>>,
+    _s: &mut JsRuntimeState,
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let state = &mut state.borrow();
+
+    let id = crate::get_args!(scope, v8::Integer, args, 1).value();
+    let msg = crate::get_args!(scope, v8::BigInt, args, 2).u64_value().0;
+    let sz = crate::get_args!(scope, v8::Integer, args, 3).value();
+
+    let mut buffer = Box::new(crate::socket_sendbuffer {
+        id: id as libc::c_int,
+        msg_type: 0 as libc::c_int,
+        buffer: msg as *const u8,
+        sz: sz as libc::size_t,
+    });
+
+    let err = unsafe {
+        crate::skynet_socket_sendbuffer_lowpriority(
+            state.skynet,
+            &mut *buffer,
+        )
+    };
+
+    let v8_ret = v8::Integer::new(scope, err as i32).into();
+    rv.set(v8_ret);
+}
+
+pub fn op_skynet_socket_sendto(
+    state: Rc<RefCell<OpState>>,
+    _s: &mut JsRuntimeState,
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let state = &mut state.borrow();
+
+    let id = crate::get_args!(scope, v8::Integer, args, 1).value();
+    let address = crate::get_args!(scope, v8::String, args, 2).to_rust_string_lossy(scope);
+    let msg = crate::get_args!(scope, v8::BigInt, args, 3).u64_value().0;
+    let sz = crate::get_args!(scope, v8::Integer, args, 4).value();
+
+    let mut buffer = Box::new(crate::socket_sendbuffer {
+        id: id as libc::c_int,
+        msg_type: 0 as libc::c_int,
+        buffer: msg as *const u8,
+        sz: sz as libc::size_t,
+    });
+
+    let err = unsafe {
+        crate::skynet_socket_udp_sendbuffer(
+            state.skynet,
+            std::ffi::CString::new(address).unwrap().as_ptr(),
+            &mut *buffer,
+        )
+    };
+
+    let v8_ret = v8::Integer::new(scope, err as i32).into();
+    rv.set(v8_ret);
 }
