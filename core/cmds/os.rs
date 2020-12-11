@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use std::env;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::convert::TryFrom;
 
 use rusty_v8 as v8;
 
@@ -28,6 +29,7 @@ pub fn init(rt: &mut crate::JsRuntime) {
     super::reg_json_sync(rt, "op_os_release", op_os_release);
     super::reg_json_sync(rt, "op_system_memory_info", op_system_memory_info);
     super::reg_json_sync(rt, "op_file_exists", op_file_exists);
+    rt.register_op("op_file_readall", op_file_readall);
     rt.register_op("op_v8_memory_info", op_v8_memory_info);
 }
 
@@ -208,4 +210,25 @@ pub fn op_file_exists(
 ) -> Result<Value, AnyError> {
     let args: PathExistsArgs = serde_json::from_value(args)?;
     Ok(json!(std::path::Path::new(&args.path).is_file()))
+}
+
+fn op_file_readall(
+    _state: Rc<RefCell<OpState>>,
+    _s: &mut JsRuntimeState,
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let path = crate::get_args!(scope, v8::String, args, 1).to_rust_string_lossy(scope);
+
+    let f = std::fs::read(path.clone());
+    if let Err(e) = f {
+        let msg = format!("read file: {} err: {}", path, e);
+        let msg = v8::String::new(scope, &msg).unwrap();
+        let exc = v8::Exception::type_error(scope, msg);
+        scope.throw_exception(exc);
+        return;
+    }
+
+    rv.set(crate::bindings::boxed_slice_to_uint8array(scope, f.unwrap().into_boxed_slice()).into());
 }

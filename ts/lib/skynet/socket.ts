@@ -186,7 +186,7 @@ function create_udp_object(id: SOCKET_ID, cb?: SOCKET_UDP_RECV) {
     })
 }
 
-export function udp(callback: SOCKET_UDP_RECV, host: string, port: number) {
+export function udp(callback: SOCKET_UDP_RECV, host: string = "", port: number = 0) {
     let id = skynet_rt.socket_udp(host, port);
     create_udp_object(id, callback);
     return id;
@@ -317,7 +317,7 @@ function get_buffer(buffer: MSGPTR|Uint8Array[]|string, sz?: number): [MSGPTR, n
     }
 }
 
-export function write(id: SOCKET_ID, buffer: MSGPTR): boolean;
+export function write(id: SOCKET_ID, buffer: MSGPTR, sz: number): boolean;
 export function write(id: SOCKET_ID, buffer: Uint8Array[]): boolean;
 export function write(id: SOCKET_ID, buffer: string): boolean;
 export function write(id: SOCKET_ID, buffer: MSGPTR|Uint8Array[]|string, sz?: number): boolean {
@@ -326,7 +326,7 @@ export function write(id: SOCKET_ID, buffer: MSGPTR|Uint8Array[]|string, sz?: nu
     return !err;
 }
 
-export function lwrite(id: SOCKET_ID, buffer: MSGPTR): boolean;
+export function lwrite(id: SOCKET_ID, buffer: MSGPTR, sz: number): boolean;
 export function lwrite(id: SOCKET_ID, buffer: Uint8Array[]): boolean;
 export function lwrite(id: SOCKET_ID, buffer: string): boolean;
 export function lwrite(id: SOCKET_ID, buffer: MSGPTR|Uint8Array[]|string, sz?: number): boolean {
@@ -335,7 +335,7 @@ export function lwrite(id: SOCKET_ID, buffer: MSGPTR|Uint8Array[]|string, sz?: n
     return !err;
 }
 
-export function sendto(id: SOCKET_ID, address: string, buffer: MSGPTR): boolean;
+export function sendto(id: SOCKET_ID, address: string, buffer: MSGPTR, sz: number): boolean;
 export function sendto(id: SOCKET_ID, address: string, buffer: Uint8Array[]): boolean;
 export function sendto(id: SOCKET_ID, address: string, buffer: string): boolean;
 export function sendto(id: SOCKET_ID, address: string, buffer: MSGPTR|Uint8Array[]|string, sz?: number): boolean {

@@ -83,6 +83,7 @@ __bootstrap.denoNs = {
   skynet: __bootstrap.skynet,
   v8inspect: __bootstrap.v8inspect,
   exists_file: __bootstrap.os.exists_file,
+  file_readall: __bootstrap.os.file_readall,
 };
 
 __bootstrap.denoNsUnstable = {

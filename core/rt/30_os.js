@@ -46,6 +46,11 @@
     return core.jsonOpSync("op_file_exists", {path: path});
   }
 
+  function file_readall(path) {
+    let ret = core.rawOpSync("op_file_readall", path);
+    return ret;
+  }
+
   const env = {
     get: getEnv,
     toObject() {
@@ -69,5 +74,6 @@
     hostname,
     loadavg,
     exists_file,
+    file_readall,
   };
 })(this);
