@@ -69,8 +69,8 @@ export function gen_interface(fd: number, is_https: boolean) {
     let socket_interface: SOCKET_INTERFACE = {
         read: readfunc(fd),
         write: writefunc(fd),
-        readall: () => {
-            return socket.readall(fd)
+        readall: (buffer?: Uint8Array, offset?: number) => {
+            return socket.readall(fd, buffer, offset)
         },
     }
     return socket_interface;
