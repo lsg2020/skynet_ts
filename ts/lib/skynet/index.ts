@@ -43,7 +43,7 @@ export type CONTEXT = {
 
 type SERVICE_ADDR = number | string;    // service_addr|service_name
 
-let session_id_callback = new Map<number, [Function, Function]>();  // session -> [resolve, reject]
+let session_id_callback = new Map<number, [Function, Function, boolean?]>();  // session -> [resolve, reject, wakeup]
 let watching_response = new Map<number, SERVICE_ADDR>();     // session -> addr
 let watching_request = new Map<number, SERVICE_ADDR>();     // session -> addr
 let unresponse = new Map<Function, SERVICE_ADDR>();   // call session -> [addr, reject]
@@ -105,23 +105,31 @@ function _error_dispatch(error_session: number, error_source: SERVICE_ADDR) {
 const SHARED_MIN_SZ = 128;
 const SHARED_MAX_SZ = 64 * 1024;
 let shared_bytes: Uint8Array;
-export function fetch_message(msg: bigint, sz: number, offset: number = 0, init: boolean = false): Uint8Array {
-    if (!shared_bytes || shared_bytes.length < sz) {
+export function fetch_message(msg: bigint, sz: number, offset: number = 0, init: boolean = false, buffer?: Uint8Array): Uint8Array {
+    let dst = buffer || shared_bytes;
+    let size = sz + offset;
+
+    if (!dst || dst.length < size) {
         let alloc_sz = SHARED_MIN_SZ;
         if (shared_bytes) {
             alloc_sz = shared_bytes.length * 2;
         }
-        alloc_sz = Math.ceil(sz / alloc_sz) * alloc_sz;
+        alloc_sz = Math.ceil(size / alloc_sz) * alloc_sz;
         if (alloc_sz >= SHARED_MAX_SZ) {
-            alloc_sz = Math.ceil(sz / SHARED_MAX_SZ) * SHARED_MAX_SZ;
+            alloc_sz = Math.ceil(size / SHARED_MAX_SZ) * SHARED_MAX_SZ;
         } else if (alloc_sz < SHARED_MIN_SZ) {
             alloc_sz = SHARED_MIN_SZ;
         }
-        shared_bytes = new Uint8Array(alloc_sz);
+        dst = new Uint8Array(alloc_sz);
+        if (buffer) {
+            dst.set(buffer);
+        } else if (!shared_bytes) {
+            shared_bytes = dst;
+        }
     }
     if (!init && sz > 0)
-        sz = Deno.skynet.fetch_message(msg, sz, shared_bytes.buffer, offset);
-    return shared_bytes;
+        sz = Deno.skynet.fetch_message(msg, sz, dst.buffer, offset);
+    return dst;
 }
 
 export function gen_token() {
@@ -138,7 +146,8 @@ async function dispatch_message(prototype: number, session: number, source: numb
             return _unknow_response(session, source, msg, sz);
         }
         session_id_callback.delete(session);
-        response_func[0]([msg, sz]);
+        if (!response_func[2])
+            response_func[0]([msg, sz]);
     } else {
         let p = proto.get(prototype);
 
@@ -170,11 +179,16 @@ export function timeout(ti: number, func: Function) {
     session_id_callback.set(session, [func, func]);
 }
 
-export function sleep(ti: number) {
+export async function sleep(ti: number, token?: number) {
+    token = token || gen_token();
+    let session = Number(skynet_rt.command("TIMEOUT", ti).result);
+    sleep_session.set(token, session);
+
     let promise = new Promise((resolve, reject) => {
-        timeout(ti, resolve);
+        session_id_callback.set(session, [resolve, reject]);
     })
-    return promise;
+    await promise;
+    sleep_session.delete(token);
 }
 
 export async function wait(token: number) {
@@ -195,6 +209,7 @@ export function wakeup(token: number) {
     let response_func = session_id_callback.get(session!);
     assert(response_func);
     response_func![0]();
+    response_func![2] = true; // BREAK
 }
 
 export function self() {

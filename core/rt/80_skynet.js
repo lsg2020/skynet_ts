@@ -136,6 +136,10 @@
         return core.rawOpSync("op_skynet_socket_sendto", id, address, msg, len);
     }
 
+    function socket_nodelay(id) {
+        core.rawOpSync("op_skynet_socket_nodelay", id);
+    }
+
     window.__bootstrap.skynet = {
         command,
         get_env,
@@ -162,5 +166,6 @@
         socket_send,
         socket_send_lowpriority,
         socket_sendto,
+        socket_nodelay,
     };
 })(this);

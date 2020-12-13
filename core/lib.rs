@@ -98,6 +98,7 @@ extern "C" {
     pub fn skynet_socket_sendbuffer(skynet: *const c_void, buffer: *mut socket_sendbuffer) -> c_int;
     pub fn skynet_socket_sendbuffer_lowpriority(skynet: *const c_void, buffer: *mut socket_sendbuffer) -> c_int;
     pub fn skynet_socket_udp_sendbuffer(skynet: *const c_void, address: *const c_char, buffer: *mut socket_sendbuffer) -> c_int;
+    pub fn skynet_socket_nodelay(skynet: *const c_void, id: c_int) -> c_void;
 }
 pub const PTYPE_TAG_DONTCOPY: c_int = 0x10000;
 pub const PTYPE_TAG_ALLOCSESSION: c_int = 0x20000;

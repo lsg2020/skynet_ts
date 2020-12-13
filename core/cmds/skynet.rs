@@ -35,6 +35,7 @@ pub fn init(rt: &mut JsRuntime) {
     rt.register_op("op_skynet_socket_send", op_skynet_socket_send);
     rt.register_op("op_skynet_socket_send_lowpriority", op_skynet_socket_send_lowpriority);
     rt.register_op("op_skynet_socket_sendto", op_skynet_socket_sendto);
+    rt.register_op("op_skynet_socket_nodelay", op_skynet_socket_nodelay);
 }
 
 #[derive(Deserialize)]
@@ -596,4 +597,23 @@ pub fn op_skynet_socket_sendto(
 
     let v8_ret = v8::Integer::new(scope, err as i32).into();
     rv.set(v8_ret);
+}
+
+pub fn op_skynet_socket_nodelay(
+    state: Rc<RefCell<OpState>>,
+    _s: &mut JsRuntimeState,
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue,
+) {
+    let state = &mut state.borrow();
+
+    let id = crate::get_args!(scope, v8::Integer, args, 1).value();
+
+    unsafe {
+        crate::skynet_socket_nodelay(
+            state.skynet,
+            id as libc::c_int,
+        )
+    };
 }
