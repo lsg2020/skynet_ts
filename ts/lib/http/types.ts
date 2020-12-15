@@ -9,5 +9,14 @@ export type SOCKET_INTERFACE = {
     read: READ_FUNC,
     readall: (buffer?: Uint8Array, offset?: number) => Promise<[Uint8Array, number]>,
     write: (content: string|Uint8Array[]) => void,
+    websocket?: boolean,
 }
 
+export type REQUEST_OPTIONS = {
+    method: string,
+    host: string,
+    url: string,
+    header?: HEADER_MAP,
+    content?: string,
+    timeout?: number,
+}

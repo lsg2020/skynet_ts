@@ -47,7 +47,7 @@ import * as http_helper from "http/helper"
 import * as skynet from "skynet"
 import { HEADER_MAP, READ_FUNC } from "http/types"
 
-export async function read_request(readbytes: READ_FUNC, bodylimit?: number): Promise<[number, string?, string?, Map<string, any>?, string?]> {
+export async function read_request(readbytes: READ_FUNC, bodylimit?: number): Promise<[number, string?, string?, HEADER_MAP?, string?]> {
     let tmpline = new Array<string>();
     let body = await internal.recvheader(readbytes, tmpline, new Uint8Array(), 0);
     if (body === undefined) {
@@ -57,12 +57,12 @@ export async function read_request(readbytes: READ_FUNC, bodylimit?: number): Pr
     let request = skynet.assert(tmpline[0]);
     let r = request.match(/^(\w+)\s+(.+)\s+HTTP\/([\d\.]+)/);
     skynet.assert(r);
-    let [method, url, httpver] = [r[1], r[2], Number(r[3])];
+    let [method, url, httpver] = [r![1], r![2], Number(r![3])];
     if (httpver < 1.0 || httpver > 1.1) {
         return [505];
     }
 
-    let header = internal.parseheader(tmpline, 1, new Map<string, any>());
+    let header = internal.parseheader(tmpline, 1, new Map());
     if (!header) {
         return [400];
     }

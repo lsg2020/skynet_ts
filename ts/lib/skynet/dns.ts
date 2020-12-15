@@ -72,6 +72,14 @@
 import * as skynet from "skynet";
 import * as socket from "skynet/socket";
 import { utf8 } from "utf8";
+import { 
+    decode_str, 
+    decode_uint16_be, 
+    decode_uint32_be, 
+    decode_uint8_be, 
+    encode_uint16_be, 
+    encode_uint8_be 
+} from "pack";
 
 const MAX_DOMAIN_LEN = 1024
 const MAX_LABEL_LEN = 63
@@ -238,36 +246,6 @@ type ANSWER = {
     qname: string,
     qtype: number,
     anss: ANSWER_ITEM[],
-}
-
-function decode_uint8_be(chunk: Uint8Array, offset: number) {
-    return chunk[offset];
-}
-function decode_uint16_be(chunk: Uint8Array, offset: number) {
-    return (chunk[offset] << 8) | (chunk[offset + 1]);
-}
-function decode_uint32_be(chunk: Uint8Array, offset: number) {
-    return decode_uint_be(chunk, offset, 4);
-}
-function decode_uint_be(chunk: Uint8Array, offset: number, n: number): number {
-    let r = 0;
-    while (n-- > 0) {
-        r = (r << 8) | chunk[offset++];
-    }
-    return r;
-}
-function decode_str(chunk: Uint8Array, offset: number, n: number): [string, number] {
-    let len = decode_uint_be(chunk, offset, n);
-    let str = utf8.read(chunk, offset + n, offset + n + len);
-    return [str, offset + n + len];
-}
-
-function encode_uint8_be(chunk: Uint8Array, offset: number, value: number) {
-    chunk[offset] = value;
-}
-function encode_uint16_be(chunk: Uint8Array, offset: number, value: number) {
-    chunk[offset] = (value >> 8) & 0xff;
-    chunk[offset+1] = value & 0xff;
 }
 
 function pack_header(t: HEADER) {

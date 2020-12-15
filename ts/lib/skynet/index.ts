@@ -399,7 +399,7 @@ export function address(addr: SERVICE_ADDR) {
     }
 }
 
-export function assert(cond: any, msg?: string) {
+export function assert<T>(cond: T, msg?: string): T {
     if (!cond) {
         let err = msg ? new Error(`assert failed ${cond} ${msg}`) : new Error(`assert failed ${cond}`);
         throw err;
