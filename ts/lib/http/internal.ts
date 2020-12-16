@@ -199,14 +199,14 @@ export async function request(socket_interface: SOCKET_INTERFACE, req: REQUEST_O
     }
 
     let statusline = tmpline[0];
-    let r = statusline.match(/HTTP\/[\d\.\s]+([\d]+)\s+(.*)$/);
+    let r = statusline.match(/HTTP\/[\d\.]+\s+([\d]+)\s+(.*)$/);
     if (!r) {
         throw new Error(`Invalid HTTP header status`);
     }
     let code = Number(r[1]);
     
     let recv_header: HEADER_MAP = new Map();
-    let header = parseheader(tmpline, 2, recv_header);
+    let header = parseheader(tmpline, 1, recv_header);
     if (!header) {
         throw new Error(`Invalid HTTP response header`);
     }

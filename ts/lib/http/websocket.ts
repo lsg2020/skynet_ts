@@ -1,8 +1,11 @@
 import * as skynet from "skynet"
+import * as socket from "skynet/socket"
 import * as crypt from "crypt"
 import * as internal from "http/internal"
 import * as httpd from "http/httpd"
+import * as http_helper from "http/helper"
 import { HEADER_MAP, SOCKET_INTERFACE } from "./types"
+
 import {
     decode_str,
     decode_uint16_be,
@@ -20,9 +23,29 @@ let GLOBAL_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 let MAX_FRAME_SIZE = 256 * 1024; // max frame is 256K
 const BUFFER_INIT_SIZE = 512;
 
-export type WS_ACCEPT_OPTIONS = {
-    handle: any,
-    fd_id: number,
+export enum HANDLE_TYPE {
+    MESSAGE,
+    CONNECT,
+    CLOSE,
+    HANDSHAKE,
+    PING,
+    PONG,
+    ERROR,
+    WARNING,
+}
+export interface HANDLE {
+    [HANDLE_TYPE.MESSAGE]?: (socket_id: number, msg: Uint8Array, sz: number) => void,
+    [HANDLE_TYPE.CONNECT]?: (socket_id: number) => void,
+    [HANDLE_TYPE.CLOSE]?: (socket_id: number, code?: number, reason?: string) => void,
+    [HANDLE_TYPE.HANDSHAKE]?: (socket_id: number, handler: HEADER_MAP, url: string) => void,
+    [HANDLE_TYPE.PING]?: (socket_id: number) => void,
+    [HANDLE_TYPE.PONG]?: (socket_id: number) => void,
+    [HANDLE_TYPE.ERROR]?: (socket_id: number) => void,
+    [HANDLE_TYPE.WARNING]?: (ws: WS_OBJ, sz: number) => void,
+}
+
+export type ACCEPT_OPTIONS = {
+    socket_id: number,
     addr: string,
     protocol: string,
     upgrade?: {
@@ -30,6 +53,7 @@ export type WS_ACCEPT_OPTIONS = {
         method: string,
         url: string,
     },
+    handle?: HANDLE,
 }
 
 export enum OP_CODE {
@@ -46,27 +70,26 @@ enum WS_MODULE {
     SERVER = "server",
 }
 
-interface WS_OBJ extends SOCKET_INTERFACE {
-    id: number,
+type WS_OBJ = {
+    close: () => void,
+    socket_id: number,
     guid: string,
     mode: WS_MODULE,
-    close: () => void,
-    recv_buffer?: Uint8Array,
-    send_buffer?: Uint8Array,
     addr?: string,
+    is_close?: boolean,
+    socket: SOCKET_INTERFACE,
+    handle?: HANDLE,
+    recv_buffer?: Uint8Array,
 }
 
 let ws_pool = new Map<number, WS_OBJ>();
 
 function _close_websocket(ws_obj: WS_OBJ) {
-    let id = ws_obj.id;
+    let id = ws_obj.socket_id;
     skynet.assert(ws_pool.get(id) == ws_obj);
+    ws_obj.is_close = true;
     ws_pool.delete(id);
     ws_obj.close();
-}
-
-function _isws_closed(id: number) {
-    return !ws_pool.has(id);
 }
 
 async function _write_handshake(ws: WS_OBJ, host: string, url: string, header?: HEADER_MAP) {
@@ -80,7 +103,7 @@ async function _write_handshake(ws: WS_OBJ, host: string, url: string, header?: 
 
     header && header.forEach((v, k) => request_header.set(k, v));
 
-    let [code, body, recv_header] = await internal.request(ws, {
+    let [code, body, recv_header] = await internal.request(ws.socket, {
         method: "GET",
         host,
         url,
@@ -102,12 +125,12 @@ async function _write_handshake(ws: WS_OBJ, host: string, url: string, header?: 
 
     let guid = ws.guid;
     sw_key = String.fromCharCode.apply(null, Array.from(crypt.base64decode(sw_key)));
-    if (sw_key != crypt.sha1.str(key + guid)) {
+    if (sw_key != String.fromCharCode.apply(null, Array.from(crypt.sha1.array(key + guid)))) {
         throw new Error(`websocket handshake invalid Sec-WebSocket-Accept`);
     }
 }
 
-async function _read_handshake(ws: WS_OBJ, accept_ops?: WS_ACCEPT_OPTIONS): Promise<[number, string?, HEADER_MAP?]> {
+async function _read_handshake(ws: WS_OBJ, accept_ops?: ACCEPT_OPTIONS): Promise<[number, string?, HEADER_MAP?]> {
     let header, url, method;
     if (accept_ops && accept_ops.upgrade) {
         url = accept_ops.upgrade.url;
@@ -115,7 +138,7 @@ async function _read_handshake(ws: WS_OBJ, accept_ops?: WS_ACCEPT_OPTIONS): Prom
         header = accept_ops.upgrade.header;
     } else {
         let tmpline = new Array<string>();
-        let header_body = await internal.recvheader(ws.read, tmpline, new Uint8Array(), 0);
+        let header_body = await internal.recvheader(ws.socket.read, tmpline, new Uint8Array(), 0);
         if (!header_body) {
             return [443];
         }
@@ -186,12 +209,15 @@ async function _read_handshake(ws: WS_OBJ, accept_ops?: WS_ACCEPT_OPTIONS): Prom
                 "Connection: Upgrade\r\n" +
                 `Sec-WebSocket-Accept: ${accept}\r\n` + 
                 sub_pro + "\r\n"
-    ws.write(resp);
+    ws.socket.write(resp);
     return [0, url, header];
 }
 
-function _try_handle(ws: WS_OBJ, method: string, ...param: any[]) {
-    // TODO
+function _try_handle<T extends keyof HANDLE>(ws: WS_OBJ, type: T, ...params: any) {
+    if (ws && ws.handle && ws.handle[type]) {
+        let handle = ws.handle[type] as any;
+        handle(ws.socket_id, ...params);
+    }
 }
 
 // TODO use send_buffer
@@ -231,13 +257,13 @@ function _write_frame(ws: WS_OBJ, op: OP_CODE, payload_data?: Uint8Array, maskin
     if (payload_len > 0) {
         write_bufs.push(payload_data);
     }
-    ws.write(write_bufs);
+    ws.socket.write(write_bufs);
 }
 
 function _read_close(payload_data: Uint8Array, payload_len: number): [number, string] {
     let code = 0;
     let reason = "";
-    if (payload_len > 2) {
+    if (payload_len >= 2) {
         code = decode_uint16_be(payload_data, 0);
         reason = String.fromCharCode.apply(null, Array.from(payload_data.slice(2, payload_len)));
     }
@@ -250,7 +276,7 @@ async function _read_frame(ws: WS_OBJ, buffer?: Uint8Array, offset: number = 0):
         ws.recv_buffer = new Uint8Array(BUFFER_INIT_SIZE);
         buffer = ws.recv_buffer;
     }
-    let [header, header_sz] = await ws.read(2);
+    let [header, header_sz] = await ws.socket.read(2);
     let v1 = decode_uint8_be(header, 0);
     let v2 = decode_uint8_be(header, 1);
     let fin = ((v1 & 0x80) != 0);
@@ -259,10 +285,10 @@ async function _read_frame(ws: WS_OBJ, buffer?: Uint8Array, offset: number = 0):
     let mask = ((v2 & 0x80) != 0);
     let payload_len = (v2 & 0x7f);
     if (payload_len == 126) {
-        let [s] = await ws.read(2);
+        let [s] = await ws.socket.read(2);
         payload_len = decode_uint16_be(s, 0);
     } else if (payload_len == 127) {
-        let [s] = await ws.read(8);
+        let [s] = await ws.socket.read(8);
         payload_len = decode_uint_be(s, 0, 8);
     }
 
@@ -272,10 +298,10 @@ async function _read_frame(ws: WS_OBJ, buffer?: Uint8Array, offset: number = 0):
 
     let masking_key: Uint8Array|undefined;
     if (mask) {
-        [masking_key] = await ws.read(4);
+        [masking_key] = await ws.socket.read(4);
     }
     if (payload_len > 0) {
-        let [msg, sz] = await ws.read(payload_len, buffer, offset);
+        let [msg, sz] = await ws.socket.read(payload_len, buffer, offset);
         if (buffer == ws.recv_buffer) {
             ws.recv_buffer = msg;
         }
@@ -289,22 +315,22 @@ async function _read_frame(ws: WS_OBJ, buffer?: Uint8Array, offset: number = 0):
     return [fin, op as OP_CODE, buffer, payload_len];
 }
 
-async function _resolve_accept(ws: WS_OBJ, options?: WS_ACCEPT_OPTIONS) {
-    _try_handle(ws, "connect");
+async function _resolve_accept(ws: WS_OBJ, options?: ACCEPT_OPTIONS) {
+    _try_handle(ws, HANDLE_TYPE.CONNECT);
     let [code, err, header] = await _read_handshake(ws, options);
     if (code) {
-        httpd.write_response(ws.write, code, err!);
-        _try_handle(ws, "close");
+        httpd.write_response(ws.socket.write, code, err!);
+        _try_handle(ws, HANDLE_TYPE.CLOSE);
         return;
     }
 
     let url = err;
-    _try_handle(ws, "handshake", header, url);
+    _try_handle(ws, HANDLE_TYPE.HANDSHAKE, [header!, url]);
     let recv_count = 0;
     
     while (true) {
-        if (_isws_closed(ws.id)) {
-            _try_handle(ws, "close");
+        if (ws.is_close) {
+            _try_handle(ws, HANDLE_TYPE.CLOSE);
             return;
         }
 
@@ -313,79 +339,81 @@ async function _resolve_accept(ws: WS_OBJ, options?: WS_ACCEPT_OPTIONS) {
         if (op == OP_CODE.CLOSE) {
             let [code, reason] = await _read_close(payload_data, recv_count);
             _write_frame(ws, OP_CODE.CLOSE);
-            _try_handle(ws, "close", code, reason);
+            _try_handle(ws, HANDLE_TYPE.CLOSE, code, reason);
             break;
         } else if (op == OP_CODE.PING) {
             _write_frame(ws, OP_CODE.PONG, payload_data);
-            _try_handle(ws, "ping");
+            _try_handle(ws, HANDLE_TYPE.PING);
         } else if (op == OP_CODE.PONG) {
-            _try_handle(ws, "pong");
+            _try_handle(ws, HANDLE_TYPE.PONG);
         } else {
             if (recv_count > MAX_FRAME_SIZE) {
                 throw new Error("payload_len is to large");
             }
             if (fin) {                    
-                _try_handle(ws, "message", payload_data, recv_count);
+                _try_handle(ws, HANDLE_TYPE.MESSAGE, payload_data, recv_count);
                 recv_count = 0;
             }
         }
     }
 }
 
-import * as socket from "skynet/socket"
-import * as http_helper from "http/helper"
-function _new_client_ws(fd_id: number, protocol: string) {
+function _new_client_ws(socket_id: number, protocol: string) {
     let obj: WS_OBJ = {
-        websocket: true,
         close: () => {
-            socket.close(fd_id);
+            socket.close(socket_id);
         },
-        read: http_helper.readfunc(fd_id),
-        write: http_helper.writefunc(fd_id),
-        readall: (buffer?: Uint8Array, offset?: number) => {
-            return socket.readall(fd_id);
+        socket: {
+            websocket: true,
+            read: http_helper.readfunc(socket_id),
+            write: http_helper.writefunc(socket_id),
+            readall: (buffer?: Uint8Array, offset?: number) => {
+                return socket.readall(socket_id);
+            },    
         },
         mode: WS_MODULE.CLIENT,
-        id: fd_id,
+        socket_id: socket_id,
         guid: GLOBAL_GUID,
     }
     
-    ws_pool.set(fd_id, obj);
+    ws_pool.set(socket_id, obj);
     return obj;
 }
 
-function _new_server_ws(fd_id: number, handle: any, protocol: string) {
+function _new_server_ws(socket_id: number, handle?: HANDLE, protocol?: string) {
     let obj: WS_OBJ = {
-        websocket: true,
         close: () => {
-            socket.close(fd_id);
+            socket.close(socket_id);
         },
-        read: http_helper.readfunc(fd_id),
-        write: http_helper.writefunc(fd_id),
-        readall: (buffer?: Uint8Array, offset?: number) => {
-            return socket.readall(fd_id);
+        socket: {
+            websocket: true,
+            read: http_helper.readfunc(socket_id),
+            write: http_helper.writefunc(socket_id),
+            readall: (buffer?: Uint8Array, offset?: number) => {
+                return socket.readall(socket_id);
+            },    
         },
         mode: WS_MODULE.SERVER,
-        id: fd_id,
+        socket_id: socket_id,
         guid: GLOBAL_GUID,
-        // handle: handle,
+        handle: handle,
     }
     
-    ws_pool.set(fd_id, obj);
+    ws_pool.set(socket_id, obj);
     return obj;
 }
 
-export async function accept(accept_ops: WS_ACCEPT_OPTIONS): Promise<[boolean, string?]> {
+export async function accept(accept_ops: ACCEPT_OPTIONS): Promise<[boolean, string?]> {
     if (!accept_ops.upgrade) {
-        await socket.start(accept_ops.fd_id);
+        await socket.start(accept_ops.socket_id);
     }
     let protocol = accept_ops.protocol || "ws";
-    let ws_obj = _new_server_ws(accept_ops.fd_id, accept_ops.handle, protocol);
+    let ws_obj = _new_server_ws(accept_ops.socket_id, accept_ops.handle, protocol);
     ws_obj.addr = accept_ops.addr;
-    let on_warning = accept_ops.handle && accept_ops.handle["warning"];
+    let on_warning = accept_ops.handle && accept_ops.handle[HANDLE_TYPE.WARNING];
     if (on_warning) {
-        socket.warning(accept_ops.fd_id, (id, sz) => {
-            on_warning(ws_obj, sz);
+        socket.warning(accept_ops.socket_id, (id, sz) => {
+            on_warning!(ws_obj, sz);
         });
     }
 
@@ -397,16 +425,15 @@ export async function accept(accept_ops: WS_ACCEPT_OPTIONS): Promise<[boolean, s
         ok = false;
         err = e.message;
     }
-    let closed = _isws_closed(accept_ops.fd_id);
-    if (!closed) {
+    if (ws_obj.is_close) {
         _close_websocket(ws_obj);
     }
     if (!ok) {
         if (err! == http_helper.SOCKET_ERROR) {
-            if (closed) {
-                _try_handle(ws_obj, "close");
+            if (ws_obj.is_close) {
+                _try_handle(ws_obj, HANDLE_TYPE.CLOSE);
             } else {
-                _try_handle(ws_obj, "error");
+                _try_handle(ws_obj, HANDLE_TYPE.ERROR);
             }
         } else {
             return [false, err!]
@@ -415,7 +442,7 @@ export async function accept(accept_ops: WS_ACCEPT_OPTIONS): Promise<[boolean, s
     return [true];
 }
 
-export async function connect(url: string, header: HEADER_MAP, timeout: number) {
+export async function connect(url: string, header?: HEADER_MAP, timeout?: number) {
     let r = url.match(/^(wss?):\/\/([^\/]+)(.*)$/);
     if (!r) {
         throw new Error(`invalid url: ${url}`);
@@ -435,7 +462,7 @@ export async function connect(url: string, header: HEADER_MAP, timeout: number) 
     let fd_id = await http_helper.connect(host_name, host_port, timeout);
     let ws_obj = _new_client_ws(fd_id, protocol);
     ws_obj.addr = host
-    _write_handshake(ws_obj, host_name, uri, header);
+    await _write_handshake(ws_obj, host_name, uri, header);
     return fd_id;
 }
 

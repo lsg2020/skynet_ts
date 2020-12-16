@@ -39,7 +39,7 @@ export function shutdown(fd: number) {
     socket.shutdown(fd);
 }
 
-export async function connect(host: string, port: number, timeout: number) {
+export async function connect(host: string, port: number, timeout?: number) {
     if (timeout) {
         let token = skynet.gen_token();
         let fd = 0;
