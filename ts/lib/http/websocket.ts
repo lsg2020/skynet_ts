@@ -73,7 +73,6 @@ enum WS_MODULE {
 type WS_OBJ = {
     close: () => void,
     socket_id: number,
-    guid: string,
     mode: WS_MODULE,
     addr?: string,
     is_close?: boolean,
@@ -123,9 +122,8 @@ async function _write_handshake(ws: WS_OBJ, host: string, url: string, header?: 
         throw new Error(`websocket handshake need Sec-WebSocket-Accept`);
     }
 
-    let guid = ws.guid;
     sw_key = String.fromCharCode.apply(null, Array.from(crypt.base64decode(sw_key)));
-    if (sw_key != String.fromCharCode.apply(null, Array.from(crypt.sha1.array(key + guid)))) {
+    if (sw_key != String.fromCharCode.apply(null, Array.from(crypt.sha1.array(key + GLOBAL_GUID)))) {
         throw new Error(`websocket handshake invalid Sec-WebSocket-Accept`);
     }
 }
@@ -203,7 +201,7 @@ async function _read_handshake(ws: WS_OBJ, accept_ops?: ACCEPT_OPTIONS): Promise
     }
 
     // response handshake
-    let accept = crypt.base64encode(crypt.sha1.array(sw_key + ws.guid));
+    let accept = crypt.base64encode(crypt.sha1.array(sw_key + GLOBAL_GUID));
     let resp = "HTTP/1.1 101 Switching Protocols\r\n" + 
                 "Upgrade: websocket\r\n" + 
                 "Connection: Upgrade\r\n" +
@@ -373,7 +371,6 @@ function _new_client_ws(socket_id: number, protocol: string) {
         },
         mode: WS_MODULE.CLIENT,
         socket_id: socket_id,
-        guid: GLOBAL_GUID,
     }
     
     ws_pool.set(socket_id, obj);
@@ -395,7 +392,6 @@ function _new_server_ws(socket_id: number, handle?: HANDLE, protocol?: string) {
         },
         mode: WS_MODULE.SERVER,
         socket_id: socket_id,
-        guid: GLOBAL_GUID,
         handle: handle,
     }
     

@@ -12,9 +12,9 @@ export function decode_uint32_be(chunk: Uint8Array, offset: number) {
 export function decode_uint_be(chunk: Uint8Array, offset: number, n: number): number {
     let r = 0;
     while (n-- > 0) {
-        r = (r << 8) | chunk[offset++];
+        r = (r * 256) + chunk[offset++];
     }
-    return r;
+    return Math.floor(r);
 }
 export function decode_str(chunk: Uint8Array, offset: number, n: number): [string, number] {
     let len = decode_uint_be(chunk, offset, n);
@@ -37,7 +37,7 @@ export function encode_uint64_be(chunk: Uint8Array, offset: number, value: numbe
 }
 export function encode_uint_be(chunk: Uint8Array, offset: number, value: number, n: number) {
     while (n-- > 0) {
-        chunk[offset+n-1] = value & 0xff;
-        value >>= 8;
+        chunk[offset+n] = value % 256;
+        value = Math.floor(value / 256);
     }
 }
