@@ -51,6 +51,7 @@ pub struct JsRuntime {
     snapshot_creator: Option<v8::SnapshotCreator>,
     has_snapshotted: bool,
     allocations: IsolateAllocations,
+    pub custom_archive: *mut c_void,
 }
 
 pub struct JsRuntimeState {
@@ -78,6 +79,9 @@ impl Drop for JsRuntime {
                 drop(creator);
             }
         }
+
+        unsafe { libc::free(self.custom_archive) };
+        self.custom_archive = std::ptr::null_mut();
     }
 }
 
@@ -167,7 +171,7 @@ impl JsRuntime {
             let isolate = v8::Isolate::new(params);
             let mut isolate = JsRuntime::setup_isolate(isolate);
             {
-                let _locker = v8::Locker::new(&mut isolate);
+                let _locker = v8::Locker::new(&mut isolate, std::ptr::null_mut());
                 let _isolate_scope = v8::IsolateScope::new(&mut isolate);
                 let _auto_check = IsolateAutoCheck::new(&mut isolate);
                 let scope = &mut v8::HandleScope::new(&mut isolate);
@@ -188,11 +192,17 @@ impl JsRuntime {
             .unwrap_or_else(|| Box::new(JsError::create));
         let op_state = OpState::default();
 
+        let custom_archive = unsafe {
+            let p = libc::malloc(1024);
+            libc::memset(p, 0, 1024);
+            p
+        };
         let mut runtime = Box::new(Self {
             v8_isolate: Some(isolate),
             snapshot_creator: maybe_snapshot_creator,
             has_snapshotted: false,
             allocations: IsolateAllocations::default(),
+            custom_archive: custom_archive,
         });
 
         let state = JsRuntimeState {

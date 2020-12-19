@@ -168,7 +168,8 @@ pub extern "C" fn dispatch_cb(
 ) -> c_int {
     let ctx = unsafe { &mut *ctx };
 
-    let _locker = v8::Locker::new(ctx.isolate.v8_isolate());
+    let custom_archive = ctx.isolate.custom_archive;
+    let _locker = v8::Locker::new(ctx.isolate.v8_isolate(), custom_archive);
     let _isolate_scope = v8::IsolateScope::new(ctx.isolate.v8_isolate());
     let _auto_check = runtime::IsolateAutoCheck::new(ctx.isolate.v8_isolate());
 
@@ -200,7 +201,8 @@ pub extern "C" fn init_cb(
         .to_str()
         .unwrap();
     let loader_path = get_env(ctx.skynet, "js_loader", "./js/loader.js");
-    let _locker = v8::Locker::new(ctx.isolate.v8_isolate());
+    let custom_archive = ctx.isolate.custom_archive;
+    let _locker = v8::Locker::new(ctx.isolate.v8_isolate(), custom_archive);
     let _isolate_scope = v8::IsolateScope::new(ctx.isolate.v8_isolate());
     let _auto_check = runtime::IsolateAutoCheck::new(ctx.isolate.v8_isolate());
 
