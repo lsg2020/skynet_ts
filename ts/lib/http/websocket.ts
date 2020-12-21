@@ -22,6 +22,7 @@ import {
 let GLOBAL_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 let MAX_FRAME_SIZE = 256 * 1024; // max frame is 256K
 const BUFFER_INIT_SIZE = 512;
+const SENDBUFFER_PRE_HEADER = 20;
 
 export enum HANDLE_TYPE {
     MESSAGE,
@@ -79,6 +80,7 @@ type WS_OBJ = {
     socket: SOCKET_INTERFACE,
     handle?: HANDLE,
     recv_buffer?: Uint8Array,
+    send_buffer?: Uint8Array,
 }
 
 let ws_pool = new Map<number, WS_OBJ>();
@@ -218,44 +220,43 @@ function _try_handle<T extends keyof HANDLE>(ws: WS_OBJ, type: T, ...params: any
     }
 }
 
-// TODO use send_buffer
-function _write_frame(ws: WS_OBJ, op: OP_CODE, payload_data?: Uint8Array, masking_key?: number) {
-    payload_data = payload_data || new Uint8Array();
-    let payload_len = payload_data.length;
+function _write_frame(ws: WS_OBJ, op: OP_CODE, payload_data?: Uint8Array, payload_sz?: number, masking_key?: number) {
+    let payload_len = payload_sz || 0;
     let v1 = 0x80 | op;
     let mask = masking_key && 0x80 || 0x00;
+
+    let end_pos = SENDBUFFER_PRE_HEADER + payload_len;
+    ws.send_buffer = skynet.fetch_message(0n, end_pos, 0, true, ws.send_buffer || new Uint8Array(BUFFER_INIT_SIZE));
+    if (payload_data && payload_data != ws.send_buffer) {
+        ws.send_buffer.set(payload_data, SENDBUFFER_PRE_HEADER);
+    }
+
+    let header_offset = SENDBUFFER_PRE_HEADER;
+    if (masking_key) {
+        header_offset -= 4;
+        encode_uint32_be(ws.send_buffer, header_offset, masking_key);
+
+        crypt.xor(ws.send_buffer, SENDBUFFER_PRE_HEADER, end_pos, ws.send_buffer.subarray(header_offset, header_offset + 4));
+    }
     
-    let s;
     // mask set to 0
     if (payload_len < 126) {
-        s = new Uint8Array(2);
-        encode_uint8_be(s, 0, v1);
-        encode_uint8_be(s, 1, mask | payload_len);
+        header_offset -= 2;
+        encode_uint8_be(ws.send_buffer, header_offset, v1);
+        encode_uint8_be(ws.send_buffer, header_offset+1, mask | payload_len);
     } else if (payload_len < 0xffff) {
-        s = new Uint8Array(4);
-        encode_uint8_be(s, 0, v1);
-        encode_uint8_be(s, 1, 126);
-        encode_uint16_be(s, 2, payload_len);
+        header_offset -= 4;
+        encode_uint8_be(ws.send_buffer, header_offset+0, v1);
+        encode_uint8_be(ws.send_buffer, header_offset+1, 126);
+        encode_uint16_be(ws.send_buffer, header_offset+2, payload_len);
     } else {
-        s = new Uint8Array(10);
-        encode_uint8_be(s, 0, v1);
-        encode_uint8_be(s, 1, 127);
-        encode_uint64_be(s, 2, payload_len);
-    }
-    let write_bufs = [s];
-
-    // write masking_key
-    if (masking_key) {
-        s = new Uint8Array(4);
-        encode_uint32_be(s, 0, masking_key);
-        write_bufs.push(s);
-        crypt.xor(payload_data, 0, payload_data.length, s);
+        header_offset -= 10;
+        encode_uint8_be(ws.send_buffer, header_offset+0, v1);
+        encode_uint8_be(ws.send_buffer, header_offset+1, 127);
+        encode_uint64_be(ws.send_buffer, header_offset+2, payload_len);
     }
 
-    if (payload_len > 0) {
-        write_bufs.push(payload_data);
-    }
-    ws.socket.write(write_bufs);
+    ws.socket.write(ws.send_buffer.subarray(header_offset, end_pos));
 }
 
 function _read_close(payload_data: Uint8Array, payload_len: number): [number, string] {
@@ -340,7 +341,7 @@ async function _resolve_accept(ws: WS_OBJ, options?: ACCEPT_OPTIONS) {
             _try_handle(ws, HANDLE_TYPE.CLOSE, code, reason);
             break;
         } else if (op == OP_CODE.PING) {
-            _write_frame(ws, OP_CODE.PONG, payload_data);
+            _write_frame(ws, OP_CODE.PONG, payload_data.subarray(0, payload_size), payload_size);
             _try_handle(ws, HANDLE_TYPE.PING);
         } else if (op == OP_CODE.PONG) {
             _try_handle(ws, HANDLE_TYPE.PONG);
@@ -472,7 +473,7 @@ export async function read(id: number): Promise<[boolean, Uint8Array, number]> {
             _close_websocket(ws_obj);
             return [false, payload_data, recv_count];
         } else if (op == OP_CODE.PING) {
-            _write_frame(ws_obj, OP_CODE.PONG, payload_data);
+            _write_frame(ws_obj, OP_CODE.PONG, payload_data.subarray(0, payload_len), payload_len);
         } else if (op != OP_CODE.PONG) {
             if (fin) {
                 return [true, payload_data, recv_count];
@@ -481,11 +482,11 @@ export async function read(id: number): Promise<[boolean, Uint8Array, number]> {
     }
 }
 
-export function write(id: number, data: Uint8Array, fmt?: OP_CODE, masking_key?: number) {
+export function write(id: number, data?: Uint8Array, sz?: number, fmt?: OP_CODE, masking_key?: number) {
     let ws_obj = skynet.assert(ws_pool.get(id))!;
     fmt = fmt || OP_CODE.TEXT;
     skynet.assert(fmt == OP_CODE.TEXT || fmt == OP_CODE.BINARY);
-    _write_frame(ws_obj, fmt, data, masking_key);
+    _write_frame(ws_obj, fmt, data, sz, masking_key);
 }
 
 export function ping(id: number) {
@@ -512,9 +513,19 @@ export function close(id: number, code?: number, reason: string = "") {
             encode_uint16_be(payload_data, 0, code);
             payload_data.set(reason_buf, 2);
         }
-        _write_frame(ws_obj, OP_CODE.CLOSE, payload_data);
+        _write_frame(ws_obj, OP_CODE.CLOSE, payload_data, payload_data?payload_data.length:0);
     } catch(e) {
         skynet.error(e.message);
     }
     _close_websocket(ws_obj);
+}
+
+export function get_sendbuffer(id: number): [Uint8Array, number] {
+    let ws_obj = skynet.assert(ws_pool.get(id))!;
+    return [ws_obj.send_buffer || new Uint8Array(BUFFER_INIT_SIZE), SENDBUFFER_PRE_HEADER];
+}
+
+export function set_sendbuffer(id: number, buffer: Uint8Array) {
+    let ws_obj = skynet.assert(ws_pool.get(id))!;
+    ws_obj.send_buffer = buffer;
 }

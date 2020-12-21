@@ -23,7 +23,7 @@ export function readfunc(fd: number) {
 export const readall = socket.readall;
 
 export function writefunc(fd: number) {
-    return (content: string|Uint8Array[]) => {
+    return (content: string|Uint8Array|Uint8Array[]) => {
         let ok = writebytes(fd, content as string);
         if (!ok) {
             throw new Error(SOCKET_ERROR);

@@ -19,44 +19,31 @@ const TYPE_LONG_STRING = 5
 const TYPE_TABLE = 6
 
 const MAX_DEPTH = 100;
-const BLOCK_BUFFER_SIZE = 128;
 const MAX_COOKIE = 32;
+const INITIAL_BUFFER_SIZE = 2048;
 
-type BLOCK_TYPE = {pos: number, view: DataView, bytes: Uint8Array};
 class encoder {
-    blocks: BLOCK_TYPE[] = [];
-    cur_blocks?: BLOCK_TYPE;
-    constructor() {
+    public pos: number;
+    public view: DataView;
+    public bytes: Uint8Array;
+
+    constructor(bytes?: Uint8Array, offset?: number) {
+        this.bytes = bytes || new Uint8Array(INITIAL_BUFFER_SIZE);
+        this.pos = offset || 0;
+        this.view = new DataView(this.bytes.buffer);
     }
 
     serialize() {
-        if (!this.blocks.length) {
-            return null;
-        }
-        let blocks = [];
-        for (let b of this.blocks) {
-            blocks.push(b.bytes.subarray(0, b.pos));
-        }        
-        return blocks;
+        return this.bytes.subarray(0, this.pos);
     }
     
     ensure_write_size(sz: number) {
-        if (!this.cur_blocks || (this.cur_blocks.bytes.length - this.cur_blocks.pos) < sz) {
-            this.alloc_block();
+        if (this.bytes.length < this.pos + sz) {
+            let new_bytes = new Uint8Array(this.bytes.length*2);
+            new_bytes.set(this.bytes);
+            this.bytes = new_bytes;
+            this.view = new DataView(this.bytes.buffer);
         }
-    }
-
-    alloc_block() {
-        let view = new DataView(new ArrayBuffer(BLOCK_BUFFER_SIZE));
-        let block = {
-            pos: 0,
-            view: view,
-            bytes: new Uint8Array(view.buffer)
-        };
-
-        this.cur_blocks = block;
-        this.blocks.push(block);
-        return block;
     }
 
     encode(object: any, depth = 0) {
@@ -157,57 +144,39 @@ class encoder {
     write_u8(v: number) {
         this.ensure_write_size(1);
         
-        this.cur_blocks!.view.setUint8(this.cur_blocks!.pos, v);
-        this.cur_blocks!.pos++;
+        this.view.setUint8(this.pos, v);
+        this.pos++;
     }
     write_i16(v: number) {
         this.ensure_write_size(2);
-        this.cur_blocks!.view.setInt16(this.cur_blocks!.pos, v, true);
-        this.cur_blocks!.pos += 2;
+        this.view.setInt16(this.pos, v, true);
+        this.pos += 2;
     }
     write_u16(v: number) {
         this.ensure_write_size(2);
-        this.cur_blocks!.view.setUint16(this.cur_blocks!.pos, v, true);
-        this.cur_blocks!.pos += 2;
+        this.view.setUint16(this.pos, v, true);
+        this.pos += 2;
     }
     write_i32(v: number) {
         this.ensure_write_size(4);
-        this.cur_blocks!.view.setInt32(this.cur_blocks!.pos, v, true);
-        this.cur_blocks!.pos += 4;
+        this.view.setInt32(this.pos, v, true);
+        this.pos += 4;
     }
     write_u32(v: number) {
         this.ensure_write_size(4);
-        this.cur_blocks!.view.setUint32(this.cur_blocks!.pos, v, true);
-        this.cur_blocks!.pos += 4;
+        this.view.setUint32(this.pos, v, true);
+        this.pos += 4;
     }
     write_f64(v: number) {
         this.ensure_write_size(8);
-        this.cur_blocks!.view.setFloat64(this.cur_blocks!.pos, v, true);
-        this.cur_blocks!.pos += 8;
+        this.view.setFloat64(this.pos, v, true);
+        this.pos += 8;
     }
     write_string(v: string) {
-        let pos = 0;
-        while (pos < v.length) {
-            let cur_block = this.cur_blocks;
-            if (!cur_block) {
-                this.alloc_block();
-                continue;
-            }
-
-            let space = cur_block.bytes.length - cur_block.pos;
-            if (!space) {
-                this.alloc_block();
-                continue;
-            }
-
-            let write_len = 0;
-            [write_len, pos] = utf8.write(v, cur_block.bytes, cur_block.pos, pos);
-            if (write_len == 0) {
-                this.alloc_block();
-                continue;
-            }
-            cur_block.pos += write_len;
-        }
+        let len = utf8.length(v);
+        this.ensure_write_size(len);
+        utf8.write(v, this.bytes, this.pos);
+        this.pos += len;
     }
 }
 
@@ -221,7 +190,7 @@ class decoder {
         this.sz = sz;
         if (buffer && buffer.length) {
             this.view = new DataView(buffer.buffer);
-            this.bytes = new Uint8Array(this.view.buffer);
+            this.bytes = buffer;
         }
     }
 
@@ -367,11 +336,20 @@ function encode(...datas: any) {
     return wb.serialize();
 }
 
+function encode_ex(bytes: Uint8Array, offset: number, ...datas: any): [Uint8Array, number] {
+    let wb = new encoder(bytes, offset);
+    for (let d of datas) {
+        wb.encode(d);
+    }
+    return [wb.bytes, wb.pos - offset];
+}
+
 function decode(buffer: Uint8Array, sz: number) {
     return new decoder(buffer, sz).decode();
 }
 
 export {
     encode,
+    encode_ex,
     decode,
 }

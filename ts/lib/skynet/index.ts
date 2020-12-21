@@ -29,7 +29,7 @@ export let PTYPE_NAME = {
 type PROTOCOL_TYPE = {
     name: string,
     id: number,
-    pack?: (...obj: any) => Uint8Array[] | null,
+    pack?: (...obj: any) => Uint8Array,
     unpack?: (buf: bigint, sz: number) => any[],
     dispatch?: Function,
 };
@@ -268,8 +268,8 @@ export function set_env(name: string, value: string) {
 
 export function send(addr: SERVICE_ADDR, typename: string, ...params: any[]): number {
     let p = proto.get(typename);
-    let pack = p!.pack!(...params) || [];
-    return skynet_rt.send(addr, p!.id, 0, ...pack);
+    let pack = p!.pack!(...params);
+    return skynet_rt.send(addr, p!.id, 0, pack);
 }
 
 export function rawsend(addr: SERVICE_ADDR, typename: string, bytes: Uint8Array): number {
@@ -302,21 +302,27 @@ async function _yield_call(session: number, addr: SERVICE_ADDR): Promise<[bigint
 
 export async function call(addr: SERVICE_ADDR, typename: string, ...params: any[]) {
     let p = proto.get(typename);
-    let pack = p!.pack!(...params) || [];
-    let session = skynet_rt.send(addr, p!.id, null, ...pack);
+    let pack = p!.pack!(...params);
+    let session = skynet_rt.send(addr, p!.id, null, pack);
     let [bytes, sz] = await _yield_call(session, addr);
 
     return p!.unpack!(bytes, sz);
 }
 
-export function ret(context: CONTEXT, ...pack: Uint8Array[]) {
+export function ret(context: CONTEXT, pack?: Uint8Array) {
     if (context.session == 0) {
         // send don't need ret
         return false;
     }
 
     watching_response.delete(context.session);
-    let ret = skynet_rt.send(context.source, PTYPE_ID.RESPONSE, context.session, ...pack);
+    let ret;
+    if (pack) {
+        ret = skynet_rt.send(context.source, PTYPE_ID.RESPONSE, context.session, pack);
+    } else {
+        ret = skynet_rt.send(context.source, PTYPE_ID.RESPONSE, context.session);
+    }
+    
     if (ret) {
         return true;
     } else if (ret === false) {
@@ -326,8 +332,8 @@ export function ret(context: CONTEXT, ...pack: Uint8Array[]) {
 }
 
 export function retpack(context: CONTEXT, ...params: any) {
-    let pack = context.proto!.pack!(...params) || [];
-    return ret(context, ...pack)
+    let pack = context.proto!.pack!(...params);
+    return ret(context, pack);
 }
 
 export function response(context: CONTEXT) {
@@ -346,8 +352,8 @@ export function response(context: CONTEXT) {
         let ret = false;
         if (unresponse.has(response)) {
             if (ok) {
-                let pack = context.proto!.pack!(...params) || [];
-                ret = skynet_rt.send(context.source, PTYPE_ID.RESPONSE, context.session, ...pack);
+                let pack = context.proto!.pack!(...params);
+                ret = skynet_rt.send(context.source, PTYPE_ID.RESPONSE, context.session, pack);
                 if (ret == false) {
 					// If the package is too large, returns false. so we should report error back
 					skynet_rt.send(context.source, PTYPE_ID.ERROR, context.session)
@@ -409,7 +415,7 @@ export function assert<T>(cond: T, msg?: string): T {
 
 export function string_unpack(msg: bigint, sz: number) {
     let bytes = fetch_message(msg, sz);
-    return [new TextDecoder().decode(bytes.slice(0, sz))];
+    return [new TextDecoder().decode(bytes.subarray(0, sz))];
 }
 
 export function string_pack(msg: string) {
@@ -424,7 +430,12 @@ import * as lua_seri from "lua_seri"
 register_protocol({
     id: PTYPE_ID.LUA,
     name: PTYPE_NAME.LUA,
-    pack: lua_seri.encode,
+    pack: (...obj: any[]): Uint8Array => {
+        let bytes = fetch_message(0n, SHARED_MIN_SZ, 0, true, shared_bytes);
+        let sz;
+        [shared_bytes, sz] = lua_seri.encode_ex(bytes, 0, ...obj);
+        return shared_bytes.subarray(0, sz);
+    },
     unpack: (msg: bigint, sz: number) => {
         return lua_seri.decode(fetch_message(msg, sz), sz); 
     },

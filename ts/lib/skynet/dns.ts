@@ -380,7 +380,7 @@ function unpack_section(answers: ANSWER_ITEM[], section: number, chunk: Uint8Arr
         let len = decode_uint16_be(chunk, left);
         let unpack_rdata = unpack_type.get(ans.qtype);
         if (unpack_rdata) {
-            unpack_rdata(ans, chunk.slice(left + 2, left + 2 + len), len);
+            unpack_rdata(ans, chunk.subarray(left + 2, left + 2 + len), len);
             answers.push(ans);
         }
         left += 2 + len;

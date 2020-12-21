@@ -306,39 +306,44 @@ export async function readline(id: SOCKET_ID, sep: string = '\n', buffer?: Uint8
 }
 
 let text_encoder = new TextEncoder();
-function get_buffer(buffer: MSGPTR|Uint8Array[]|string, sz?: number): [MSGPTR, number] {
+function get_buffer(buffer: Uint8Array|MSGPTR|Uint8Array[]|string, sz?: number): [MSGPTR, number] {
     let t = typeof(buffer);
     if (t == "bigint") {
         return [buffer as MSGPTR, sz!];
     } else if (t == "string") {
         return skynet_rt.socket_alloc_msg(text_encoder.encode(buffer as string));
+    } else if (buffer instanceof Uint8Array) {
+        return skynet_rt.socket_alloc_msg(buffer);
     } else {
         return skynet_rt.socket_alloc_msg(...(buffer as Uint8Array[]));
     }
 }
 
 export function write(id: SOCKET_ID, buffer: MSGPTR, sz: number): boolean;
+export function write(id: SOCKET_ID, buffer: Uint8Array): boolean;
 export function write(id: SOCKET_ID, buffer: Uint8Array[]): boolean;
 export function write(id: SOCKET_ID, buffer: string): boolean;
-export function write(id: SOCKET_ID, buffer: MSGPTR|Uint8Array[]|string, sz?: number): boolean {
+export function write(id: SOCKET_ID, buffer: Uint8Array|MSGPTR|Uint8Array[]|string, sz?: number): boolean {
     let [msg, len] = get_buffer(buffer, sz);
     let err = skynet_rt.socket_send(id, msg, len);
     return !err;
 }
 
 export function lwrite(id: SOCKET_ID, buffer: MSGPTR, sz: number): boolean;
+export function lwrite(id: SOCKET_ID, buffer: Uint8Array): boolean;
 export function lwrite(id: SOCKET_ID, buffer: Uint8Array[]): boolean;
 export function lwrite(id: SOCKET_ID, buffer: string): boolean;
-export function lwrite(id: SOCKET_ID, buffer: MSGPTR|Uint8Array[]|string, sz?: number): boolean {
+export function lwrite(id: SOCKET_ID, buffer: Uint8Array|MSGPTR|Uint8Array[]|string, sz?: number): boolean {
     let [msg, len] = get_buffer(buffer, sz);
     let err = skynet_rt.socket_send_lowpriority(id, msg, len);
     return !err;
 }
 
 export function sendto(id: SOCKET_ID, address: string, buffer: MSGPTR, sz: number): boolean;
+export function sendto(id: SOCKET_ID, address: string, buffer: Uint8Array): boolean;
 export function sendto(id: SOCKET_ID, address: string, buffer: Uint8Array[]): boolean;
 export function sendto(id: SOCKET_ID, address: string, buffer: string): boolean;
-export function sendto(id: SOCKET_ID, address: string, buffer: MSGPTR|Uint8Array[]|string, sz?: number): boolean {
+export function sendto(id: SOCKET_ID, address: string, buffer: Uint8Array|MSGPTR|Uint8Array[]|string, sz?: number): boolean {
     let [msg, len] = get_buffer(buffer, sz);
     let err = skynet_rt.socket_sendto(id, address, msg, len);
     return !err;

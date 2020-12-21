@@ -8,7 +8,7 @@ export type SOCKET_INTERFACE = {
     close?: () => void,
     read: READ_FUNC,
     readall: (buffer?: Uint8Array, offset?: number) => Promise<[Uint8Array, number]>,
-    write: (content: string|Uint8Array[]) => void,
+    write: (content: string|Uint8Array|Uint8Array[]) => void,
     websocket?: boolean,
 }
 
