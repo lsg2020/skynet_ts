@@ -39,7 +39,7 @@ class encoder {
     
     ensure_write_size(sz: number) {
         if (this.bytes.length < this.pos + sz) {
-            let new_bytes = new Uint8Array(this.bytes.length*2);
+            let new_bytes = new Uint8Array((this.pos + sz)*2);
             new_bytes.set(this.bytes);
             this.bytes = new_bytes;
             this.view = new DataView(this.bytes.buffer);

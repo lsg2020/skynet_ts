@@ -217,6 +217,7 @@ pub extern "C" fn init_cb(
     cmds::random::init(&mut ctx.isolate, None);
     cmds::skynet::init(&mut ctx.isolate);
     cmds::inspect::init(&mut ctx.isolate);
+    cmds::tls::init(&mut ctx.isolate);
 
     let inspector = get_env(ctx.skynet, "js_inspector", "false");
     if inspector == "true" {

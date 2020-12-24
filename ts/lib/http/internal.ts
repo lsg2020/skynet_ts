@@ -24,14 +24,14 @@ function buffer_find(buffer: Uint8Array, start: number, end: number, dst: Uint8A
 export async function recvheader(readbytes: READ_FUNC, lines: Array<string>, header: Uint8Array, header_sz: number) {
     if (header_sz >= SPLIT_STR.length) {
         if (buffer_find(header, 0, SPLIT_STR.length, SPLIT_STR) == 0) {
-            return header.slice(SPLIT_STR.length, header_sz);
+            return header.subarray(SPLIT_STR.length, header_sz);
         }
     }
     let result;
     let e = buffer_find(header, 0, header_sz, END_STR);
     if (e >= 0) {
-        result = header.slice(e + END_STR.length, header_sz);
-        header = header.slice(0, e);
+        result = header.subarray(e + END_STR.length, header_sz);
+        header = header.subarray(0, e);
     } else {
         while (true) {
             let [bytes, sz] = await readbytes(undefined, header, header_sz);
@@ -40,12 +40,12 @@ export async function recvheader(readbytes: READ_FUNC, lines: Array<string>, hea
 
             e = buffer_find(header, 0, header_sz, END_STR);
             if (e >= 0) {
-                result = header.slice(e + END_STR.length, header_sz);
-                header = header.slice(0, e);
+                result = header.subarray(e + END_STR.length, header_sz);
+                header = header.subarray(0, e);
                 break;
             }
             if (buffer_find(header, 0, SPLIT_STR.length, SPLIT_STR) == 0) {
-                return header.slice(SPLIT_STR.length, header_sz);
+                return header.subarray(SPLIT_STR.length, header_sz);
             }
             if (header.length > LIMIT) {
                 return;
@@ -99,7 +99,7 @@ async function chunksize(readbytes: READ_FUNC, body: Uint8Array, body_sz: number
     while (true) {
         let index = buffer_find(body, 0, body_sz, SPLIT_STR);
         if (index >= 0) {
-            return [parseInt(http_helper.decode_str(body, 0, index), 16), body.slice(index+SPLIT_STR.length, body_sz)];
+            return [parseInt(http_helper.decode_str(body, 0, index), 16), body.subarray(index+SPLIT_STR.length, body_sz)];
         }
 
         if (body_sz > 128) {
@@ -116,7 +116,7 @@ async function readcrln(readbytes: READ_FUNC, body: Uint8Array) {
         if (buffer_find(body, 0, SPLIT_STR.length, SPLIT_STR) == -1) {
             return;
         }
-        return body.slice(SPLIT_STR.length);
+        return body.subarray(SPLIT_STR.length);
     } else {
         [body] = await readbytes(2 - body.length, body, body.length);
         if (buffer_find(body, 0, SPLIT_STR.length, SPLIT_STR) == -1) {
@@ -126,9 +126,20 @@ async function readcrln(readbytes: READ_FUNC, body: Uint8Array) {
     }
 }
 
+function buffer_copy(dst: Uint8Array, offset: number, src: Uint8Array) {
+    if (dst.length < offset + src.length) {
+        let n = new Uint8Array((offset + src.length) * 2);
+        n.set(dst);
+        dst = n;
+    }
+    dst.set(src, offset);
+    return dst;
+}
+
 export async function recvchunkedbody(readbytes: READ_FUNC, bodylimit: number|undefined, header: HEADER_MAP, body: Uint8Array): Promise<[Uint8Array, HEADER_MAP]|undefined> {
     let size = 0;
-    let result = new Array<Uint8Array>();
+    let result_buf = new Uint8Array(128);
+    let result_sz = 0;
     while (true) {
         let sz;
         let r = await chunksize(readbytes, body, body.length);
@@ -144,11 +155,13 @@ export async function recvchunkedbody(readbytes: READ_FUNC, bodylimit: number|un
             return;
         }
         if (body.length >= sz) {
-            result.push(body.slice(0, sz));
-            body = body.slice(sz);
+            result_buf = buffer_copy(result_buf, result_sz, body.subarray(0, sz));
+            result_sz += sz;
+            body = body.subarray(sz);
         } else {
             [body] = await readbytes(sz - body.length, body, body.length);
-            result.push(body);
+            result_buf = buffer_copy(result_buf, result_sz, body.subarray(0, sz));
+            result_sz += sz;
             body = new Uint8Array();
         }
 
@@ -165,14 +178,7 @@ export async function recvchunkedbody(readbytes: READ_FUNC, bodylimit: number|un
     }
     header = parseheader(tmpline, 0, header)!;
 
-    let r = new Uint8Array(size);
-    let offset = 0;
-    result.forEach((body) => {
-        r.set(body, offset);
-        offset += body.length;
-    });
-
-    return [r, header];
+    return [result_buf.subarray(0, result_sz), header];
 }
 
 export async function request(socket_interface: SOCKET_INTERFACE, req: REQUEST_OPTIONS): Promise<[number, string, HEADER_MAP]> {

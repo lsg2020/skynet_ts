@@ -61,7 +61,7 @@ export async function request(req: REQUEST_OPTIONS): Promise<[number, string]> {
             }
         });
     }
-    socket_interface.init && socket_interface.init();
+    socket_interface.init && await socket_interface.init();
 
     try {
         let [code, body] = await internal.request(socket_interface, req);

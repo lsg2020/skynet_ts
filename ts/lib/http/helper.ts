@@ -64,19 +64,148 @@ export async function connect(host: string, port: number, timeout?: number) {
     return fd;
 }
 
+let SSLCTX_CLIENT: bigint;
+let tls_rt = Deno.tls;
 export function gen_interface(fd: number, is_https: boolean) {
-    skynet.assert(!is_https, "not support https");
-    let socket_interface: SOCKET_INTERFACE = {
-        read: readfunc(fd),
-        write: writefunc(fd),
-        readall: (buffer?: Uint8Array, offset?: number) => {
-            return socket.readall(fd, buffer, offset)
-        },
+    if (is_https) {
+        SSLCTX_CLIENT = SSLCTX_CLIENT || tls_newctx();
+        let tls_ctx = tls_newtls(SSLCTX_CLIENT, "client");
+        let socket_interface: SOCKET_INTERFACE = {
+            init: tls_init_requestfunc(fd, tls_ctx),
+            close: tls_closefunc(tls_ctx),
+            read: tls_readfunc(fd, tls_ctx),
+            write: tls_writefunc(fd, tls_ctx),
+            readall: tls_readallfunc(fd, tls_ctx),
+        }
+        return socket_interface;
+    } else {
+        let socket_interface: SOCKET_INTERFACE = {
+            read: readfunc(fd),
+            write: writefunc(fd),
+            readall: (buffer?: Uint8Array, offset?: number) => {
+                return socket.readall(fd, buffer, offset)
+            },
+        }
+        return socket_interface;
     }
-    return socket_interface;
 }
 
 export function decode_str(buffer: Uint8Array, start: number, end: number) {
     // String.fromCharCode.apply(null, Array.from(buffer.slice(start, end)))
     return utf8.read(buffer, start, end);
+}
+
+export function tls_init_requestfunc(fd: number, ctx: bigint) {
+    let read = readfunc(fd);
+    let write = writefunc(fd);
+    return async () => {
+        let bio_sz = tls_rt.handshake(ctx);
+        let ds1 = skynet.fetch_message(0n, bio_sz, 0, true);
+        let ds1_sz = tls_rt.bio_read(ctx, ds1.buffer, 0);
+        write(ds1.subarray(0, ds1_sz));
+
+        while (!tls_rt.finished(ctx)) {
+            let [ds2, ds2_sz] = await read();
+            tls_rt.bio_write(ctx, ds2.subarray(0, ds2_sz));
+            bio_sz = tls_rt.handshake(ctx);
+
+            if (bio_sz) {
+                let ds3 = skynet.fetch_message(0n, bio_sz, 0, true);
+                let ds3_sz = tls_rt.bio_read(ctx, ds3.buffer, 0);
+                write(ds3.subarray(0, ds3_sz));
+            }
+        }
+    }
+}
+
+export function tls_init_responsefunc(fd: number, ctx: bigint) {
+    let read = readfunc(fd);
+    let write = writefunc(fd);
+    return async () => {
+        let bio_sz: number;
+        while (!tls_rt.finished(ctx)) {
+            let [ds1, ds1_sz] = await read();
+            tls_rt.bio_write(ctx, ds1.subarray(0, ds1_sz));
+            bio_sz = tls_rt.handshake(ctx);
+
+            if (bio_sz) {
+                let ds2 = skynet.fetch_message(0n, bio_sz, 0, true);
+                let ds2_sz = tls_rt.bio_read(ctx, ds2.buffer, 0);
+                write(ds2.subarray(0, ds2_sz));
+            }
+        }
+
+        bio_sz = tls_rt.ssl_write(ctx);
+        let ds3 = skynet.fetch_message(0n, bio_sz, 0, true);
+        let ds3_sz = tls_rt.bio_read(ctx, ds3.buffer, 0);
+        write(ds3.subarray(0, ds3_sz));
+    }
+}
+
+export function tls_closefunc(ctx: bigint) {
+    return () => {
+        tls_rt.free_tls(ctx);
+    }
+}
+
+export function tls_newctx(): bigint {
+    return tls_rt.new_ctx();
+}
+
+export function tls_newtls(ctx: bigint, method: "client"|"server"): bigint {
+    return tls_rt.new_tls(ctx, method);
+}
+
+let text_encoder = new TextEncoder();
+export function tls_writefunc(fd: number, ctx: bigint) {
+    let write = writefunc(fd);
+    return (content: string|Uint8Array|Uint8Array[]) => {
+        let bio_sz: number;
+        if (typeof(content) == "string") {
+            bio_sz = tls_rt.ssl_write(ctx, text_encoder.encode(content));
+        } else if (content instanceof Uint8Array) {
+            bio_sz = tls_rt.ssl_write(ctx, content);
+        } else {
+            bio_sz = tls_rt.ssl_write(ctx, ...content);
+        }
+        let buffer = skynet.fetch_message(0n, bio_sz, 0, true);
+        let sz = tls_rt.bio_read(ctx, buffer.buffer, 0);
+        return write(buffer.subarray(0, sz));
+    }
+}
+
+export function tls_readallfunc(fd: number, ctx: bigint) {
+    return async (buffer?: Uint8Array, offset: number = 0): Promise<[Uint8Array, number]> => {
+        [buffer, offset] = await socket.readall(fd, buffer, offset);
+        let sz = tls_rt.bio_write(ctx, buffer.subarray(0, offset));
+        while (sz) {
+            buffer = skynet.fetch_message(0n, sz, offset, true, buffer);
+            let read_sz;
+            [read_sz, sz] = tls_rt.ssl_read(ctx, buffer.buffer, offset, sz);
+            offset += read_sz;
+        }
+        return [buffer, sz]
+    }
+}
+
+export function tls_readfunc(fd: number, ctx: bigint) {
+    let read = readfunc(fd);
+    return async (sz?: number, buffer?: Uint8Array, offset: number = 0): Promise<[Uint8Array, number]> => {
+        let alloc_sz = sz ? sz : 128;
+        let recv_sz = 0;
+        buffer = skynet.fetch_message(0n, alloc_sz, offset, true, buffer || new Uint8Array());
+
+        while (recv_sz < (sz ? sz : 1)) {
+            let [read_sz, ssl_sz] = tls_rt.ssl_read(ctx, buffer.buffer, offset, alloc_sz);
+            if (read_sz) {
+                offset += read_sz;
+                recv_sz += read_sz;
+                alloc_sz -= read_sz;
+            } else if (!ssl_sz) {
+                let [raw_msg, raw_sz] = await read();
+                tls_rt.bio_write(ctx, raw_msg.subarray(0, raw_sz));
+            }
+        }
+        return [buffer, recv_sz];
+    }
 }

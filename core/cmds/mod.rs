@@ -4,6 +4,7 @@ pub mod os;
 pub mod random;
 pub mod skynet;
 pub mod inspect;
+pub mod tls;
 
 use crate::error::AnyError;
 use crate::json_op_sync;

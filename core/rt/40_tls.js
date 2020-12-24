@@ -1,82 +1,61 @@
-// Copyright 2018-2020 the Deno authors. All rights reserved. MIT license.
-
 ((window) => {
   const core = window.Deno.core;
-  const { Listener, Conn } = window.__bootstrap.net;
 
-  function opConnectTls(
-    args,
-  ) {
-    return core.jsonOpAsync("op_connect_tls", args);
+  function new_ctx() {
+    return core.rawOpSync("op_tls_new_ctx");
   }
 
-  function opAcceptTLS(rid) {
-    return core.jsonOpAsync("op_accept_tls", { rid });
+  function free_ctx(ctx) {
+      core.rawOpSync("op_tls_free_ctx", ctx);
   }
 
-  function opListenTls(args) {
-    return core.jsonOpSync("op_listen_tls", args);
+  function set_cert(ctx, certfile, keyfile) {
+    core.rawOpSync("op_tls_set_cert", ctx, certfile, keyfile);
   }
 
-  function opStartTls(args) {
-    return core.jsonOpAsync("op_start_tls", args);
+  function new_tls(ctx, method) {
+    return core.rawOpSync("op_tls_new_tls", ctx, method);
   }
 
-  async function connectTls({
-    port,
-    hostname = "127.0.0.1",
-    transport = "tcp",
-    certFile = undefined,
-  }) {
-    const res = await opConnectTls({
-      port,
-      hostname,
-      transport,
-      certFile,
-    });
-    return new Conn(res.rid, res.remoteAddr, res.localAddr);
+  function free_tls(ctx) {
+    core.rawOpSync("op_tls_free_tls", ctx);
   }
 
-  class TLSListener extends Listener {
-    async accept() {
-      const res = await opAcceptTLS(this.rid);
-      return new Conn(res.rid, res.remoteAddr, res.localAddr);
-    }
+  function finished(ctx) {
+    return core.rawOpSync("op_tls_finished", ctx);
+  }
+  
+  function handshake(ctx) {
+    return core.rawOpSync("op_tls_handshake", ctx);
   }
 
-  function listenTls({
-    port,
-    certFile,
-    keyFile,
-    hostname = "0.0.0.0",
-    transport = "tcp",
-  }) {
-    const res = opListenTls({
-      port,
-      certFile,
-      keyFile,
-      hostname,
-      transport,
-    });
-    return new TLSListener(res.rid, res.localAddr);
+  function bio_write(ctx, ...buffer) {
+    return core.rawOpSync("op_tls_bio_write", ctx, ...buffer);
   }
 
-  async function startTls(
-    conn,
-    { hostname = "127.0.0.1", certFile } = {},
-  ) {
-    const res = await opStartTls({
-      rid: conn.rid,
-      hostname,
-      certFile,
-    });
-    return new Conn(res.rid, res.remoteAddr, res.localAddr);
+  function bio_read(ctx, buffer, offset) {
+    return core.rawOpSync("op_tls_bio_read", ctx, buffer, offset);
+  }
+
+  function ssl_write(ctx, ...buffer) {
+    return core.rawOpSync("op_tls_ssl_write", ctx, ...buffer);
+  }
+
+  function ssl_read(ctx, buffer, offset, sz) {
+    return core.rawOpSync("op_tls_ssl_read", ctx, buffer, offset, sz);
   }
 
   window.__bootstrap.tls = {
-    startTls,
-    listenTls,
-    connectTls,
-    TLSListener,
+    new_ctx,
+    free_ctx,
+    set_cert,
+    new_tls,
+    free_tls,
+    finished,
+    handshake,
+    bio_write,
+    bio_read,
+    ssl_write,
+    ssl_read,
   };
 })(this);
