@@ -4,7 +4,7 @@ import * as crypt from "crypt"
 import * as internal from "http/internal"
 import * as httpd from "http/httpd"
 import * as http_helper from "http/helper"
-import { HEADER_MAP, SOCKET_INTERFACE } from "./types"
+import { HEADER_MAP, INTERFACE_TYPE, SOCKET_INTERFACE } from "http/types"
 
 import {
     decode_str,
@@ -55,6 +55,7 @@ export type ACCEPT_OPTIONS = {
         url: string,
     },
     handle?: HANDLE,
+    tls_ctx?: bigint,
 }
 
 export enum OP_CODE {
@@ -88,9 +89,11 @@ let ws_pool = new Map<number, WS_OBJ>();
 function _close_websocket(ws_obj: WS_OBJ) {
     let id = ws_obj.socket_id;
     skynet.assert(ws_pool.get(id) == ws_obj);
-    ws_obj.is_close = true;
-    ws_pool.delete(id);
-    ws_obj.close();
+    if (!ws_obj.is_close) {
+        ws_obj.is_close = true;
+        ws_pool.delete(id);
+        ws_obj.close();    
+    }
 }
 
 async function _write_handshake(ws: WS_OBJ, host: string, url: string, header?: HEADER_MAP) {
@@ -357,43 +360,63 @@ async function _resolve_accept(ws: WS_OBJ, options?: ACCEPT_OPTIONS) {
     }
 }
 
-function _new_client_ws(socket_id: number, protocol: string) {
-    let obj: WS_OBJ = {
-        close: () => {
-            socket.close(socket_id);
-        },
-        socket: {
-            websocket: true,
-            read: http_helper.readfunc(socket_id),
-            write: http_helper.writefunc(socket_id),
-            readall: (buffer?: Uint8Array, offset?: number) => {
-                return socket.readall(socket_id);
-            },    
-        },
-        mode: WS_MODULE.CLIENT,
-        socket_id: socket_id,
+let SSLCTX_CLIENT: bigint;
+async function _new_client_ws(socket_id: number, protocol: string) {
+    let obj: WS_OBJ;
+    if (protocol == "wss") {
+        SSLCTX_CLIENT = SSLCTX_CLIENT || http_helper.tls_newctx();
+        let tls_ctx = http_helper.tls_newtls(SSLCTX_CLIENT, INTERFACE_TYPE.CLIENT);
+
+        await http_helper.tls_init_requestfunc(socket_id, tls_ctx)();
+        obj = {
+            close: () => {
+                socket.close(socket_id);
+                http_helper.tls_closefunc(tls_ctx)();
+            },
+            socket: http_helper.gen_interface(INTERFACE_TYPE.CLIENT, socket_id, tls_ctx, true),
+            mode: WS_MODULE.CLIENT,
+            socket_id: socket_id,
+        }
+    } else {
+        obj = {
+            close: () => {
+                socket.close(socket_id);
+            },
+            socket: http_helper.gen_interface(INTERFACE_TYPE.CLIENT, socket_id, undefined, true),
+            mode: WS_MODULE.CLIENT,
+            socket_id: socket_id,
+        }
     }
-    
+
     ws_pool.set(socket_id, obj);
     return obj;
 }
 
-function _new_server_ws(socket_id: number, handle?: HANDLE, protocol?: string) {
-    let obj: WS_OBJ = {
-        close: () => {
-            socket.close(socket_id);
-        },
-        socket: {
-            websocket: true,
-            read: http_helper.readfunc(socket_id),
-            write: http_helper.writefunc(socket_id),
-            readall: (buffer?: Uint8Array, offset?: number) => {
-                return socket.readall(socket_id);
-            },    
-        },
-        mode: WS_MODULE.SERVER,
-        socket_id: socket_id,
-        handle: handle,
+async function _new_server_ws(socket_id: number, handle?: HANDLE, protocol?: string, tls_ctx?: bigint) {
+    let obj: WS_OBJ;
+    if (protocol == "wss") {
+        skynet.assert(tls_ctx);
+        await http_helper.tls_init_responsefunc(socket_id, tls_ctx!)();
+        obj = {
+            close: () => {
+                socket.close(socket_id);
+                http_helper.tls_closefunc(tls_ctx!)();
+            },
+            socket: http_helper.gen_interface(INTERFACE_TYPE.SERVER, socket_id, tls_ctx, true),
+            mode: WS_MODULE.SERVER,
+            socket_id: socket_id,
+            handle: handle,
+        }
+    } else {
+        obj = {
+            close: () => {
+                socket.close(socket_id);
+            },
+            socket: http_helper.gen_interface(INTERFACE_TYPE.SERVER, socket_id, undefined, true),
+            mode: WS_MODULE.SERVER,
+            socket_id: socket_id,
+            handle: handle,
+        }
     }
     
     ws_pool.set(socket_id, obj);
@@ -405,7 +428,7 @@ export async function accept(accept_ops: ACCEPT_OPTIONS): Promise<[boolean, stri
         await socket.start(accept_ops.socket_id);
     }
     let protocol = accept_ops.protocol || "ws";
-    let ws_obj = _new_server_ws(accept_ops.socket_id, accept_ops.handle, protocol);
+    let ws_obj = await _new_server_ws(accept_ops.socket_id, accept_ops.handle, protocol, accept_ops.tls_ctx);
     ws_obj.addr = accept_ops.addr;
     let on_warning = accept_ops.handle && accept_ops.handle[HANDLE_TYPE.WARNING];
     if (on_warning) {
@@ -422,7 +445,7 @@ export async function accept(accept_ops: ACCEPT_OPTIONS): Promise<[boolean, stri
         ok = false;
         err = e.message;
     }
-    if (ws_obj.is_close) {
+    if (!ws_obj.is_close) {
         _close_websocket(ws_obj);
     }
     if (!ok) {
@@ -457,7 +480,7 @@ export async function connect(url: string, header?: HEADER_MAP, timeout?: number
 
     uri = url || "/";
     let fd_id = await http_helper.connect(host_name, host_port, timeout);
-    let ws_obj = _new_client_ws(fd_id, protocol);
+    let ws_obj = await _new_client_ws(fd_id, protocol);
     ws_obj.addr = host
     await _write_handshake(ws_obj, host_name, uri, header);
     return fd_id;

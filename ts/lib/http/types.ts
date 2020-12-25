@@ -20,3 +20,8 @@ export type REQUEST_OPTIONS = {
     content?: string,
     timeout?: number,
 }
+
+export enum INTERFACE_TYPE {
+    CLIENT = "client",
+    SERVER = "server",
+}

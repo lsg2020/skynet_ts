@@ -393,9 +393,6 @@ fn send<'s>(
     args: v8::FunctionCallbackArguments,
     rv: v8::ReturnValue,
 ) {
-    let state_rc = JsRuntime::state(scope);
-    let mut state = state_rc.borrow_mut();
-
     let op_id = match v8::Local::<v8::Integer>::try_from(args.get(0))
         .map_err(AnyError::from)
         .and_then(|l| OpId::try_from(l.value()).map_err(AnyError::from))
@@ -410,6 +407,9 @@ fn send<'s>(
         }
     };
 
+    // println!("-------------- op_id: {}", op_id);
+    let state_rc = JsRuntime::state(scope);
+    let mut state = state_rc.borrow_mut();
     OpTable::route_op(op_id, state.op_state.clone(), &mut state, scope, args, rv);
 }
 

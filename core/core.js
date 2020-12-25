@@ -64,6 +64,7 @@
     const opsMapBytes = send(0);
     const opsMapJson = String.fromCharCode.apply(null, opsMapBytes);
     opsCache = JSON.parse(opsMapJson);
+    //console.log("-----------", JSON.stringify(opsCache, null, 4));
     return { ...opsCache };
   }
 

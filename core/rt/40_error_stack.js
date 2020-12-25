@@ -12,6 +12,7 @@
   }
 
   function opApplySourceMap(location) {
+    return location;
     const res = core.jsonOpSync("op_apply_source_map", location);
     return {
       fileName: res.fileName,

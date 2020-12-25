@@ -3,7 +3,7 @@ import * as skynet from "skynet";
 import * as dns from "skynet/dns";
 import * as http_helper from "http/helper";
 import * as internal from "http/internal";
-import { REQUEST_OPTIONS } from "http/types"
+import { REQUEST_OPTIONS, SOCKET_INTERFACE, INTERFACE_TYPE } from "http/types"
 
 enum PROTOCOL_TYPE {
     HTTP = "http",
@@ -31,6 +31,7 @@ export let HTTPC_CONF = {
     default_timeout: 500,
 }
 
+let SSLCTX_CLIENT: bigint;
 export async function request(req: REQUEST_OPTIONS): Promise<[number, string]> {
     let timeout = req.timeout === undefined ? HTTPC_CONF.default_timeout : req.timeout;
     let protocol;
@@ -50,14 +51,20 @@ export async function request(req: REQUEST_OPTIONS): Promise<[number, string]> {
     if (!fd) {
         throw new Error(`${protocol} connect error host:${hostname} port:${port} timeout:${timeout}`);
     }
-    let socket_interface = http_helper.gen_interface(fd, protocol == PROTOCOL_TYPE.HTTPS);
+    let socket_interface: SOCKET_INTERFACE;
+    if (protocol == PROTOCOL_TYPE.HTTPS) {
+        SSLCTX_CLIENT = SSLCTX_CLIENT || http_helper.tls_newctx();
+        let tls_ctx = http_helper.tls_newtls(SSLCTX_CLIENT, INTERFACE_TYPE.CLIENT);
+        socket_interface = http_helper.gen_interface(INTERFACE_TYPE.CLIENT, fd, tls_ctx);
+    } else {
+        socket_interface = http_helper.gen_interface(INTERFACE_TYPE.CLIENT, fd);
+    }
     let finish = false;
 
     if (timeout) {
         skynet.timeout(timeout, () => {
             if (!finish) {
                 http_helper.shutdown(fd);
-                socket_interface.close && socket_interface.close();
             }
         });
     }

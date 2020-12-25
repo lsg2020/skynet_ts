@@ -1,6 +1,6 @@
 import * as skynet from "skynet"
 import * as socket from "skynet/socket"
-import { SOCKET_INTERFACE } from "http/types"
+import { SOCKET_INTERFACE, INTERFACE_TYPE } from "http/types"
 
 import { utf8 } from "utf8"
 
@@ -64,18 +64,16 @@ export async function connect(host: string, port: number, timeout?: number) {
     return fd;
 }
 
-let SSLCTX_CLIENT: bigint;
 let tls_rt = Deno.tls;
-export function gen_interface(fd: number, is_https: boolean) {
-    if (is_https) {
-        SSLCTX_CLIENT = SSLCTX_CLIENT || tls_newctx();
-        let tls_ctx = tls_newtls(SSLCTX_CLIENT, "client");
+export function gen_interface(type: INTERFACE_TYPE, fd: number, tls_ctx?: bigint, websocket?: boolean) {
+    if (tls_ctx) {
         let socket_interface: SOCKET_INTERFACE = {
-            init: tls_init_requestfunc(fd, tls_ctx),
+            init: type == INTERFACE_TYPE.SERVER ? tls_init_responsefunc(fd, tls_ctx) : tls_init_requestfunc(fd, tls_ctx),
             close: tls_closefunc(tls_ctx),
             read: tls_readfunc(fd, tls_ctx),
             write: tls_writefunc(fd, tls_ctx),
             readall: tls_readallfunc(fd, tls_ctx),
+            websocket: websocket == true,
         }
         return socket_interface;
     } else {
@@ -85,6 +83,7 @@ export function gen_interface(fd: number, is_https: boolean) {
             readall: (buffer?: Uint8Array, offset?: number) => {
                 return socket.readall(fd, buffer, offset)
             },
+            websocket: websocket == true,
         }
         return socket_interface;
     }
@@ -152,8 +151,8 @@ export function tls_newctx(): bigint {
     return tls_rt.new_ctx();
 }
 
-export function tls_newtls(ctx: bigint, method: "client"|"server"): bigint {
-    return tls_rt.new_tls(ctx, method);
+export function tls_newtls(ctx: bigint, type: INTERFACE_TYPE): bigint {
+    return tls_rt.new_tls(ctx, type);
 }
 
 let text_encoder = new TextEncoder();
@@ -208,4 +207,8 @@ export function tls_readfunc(fd: number, ctx: bigint) {
         }
         return [buffer, recv_sz];
     }
+}
+
+export function tls_setcert(ctx: bigint, certfile: string, keyfile: string) {
+    tls_rt.set_cert(ctx, certfile, keyfile)
 }
