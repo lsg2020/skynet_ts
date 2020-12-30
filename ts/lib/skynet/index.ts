@@ -173,7 +173,7 @@ async function dispatch_message(prototype: number, session: number, source: numb
 }
 
 export function timeout(ti: number, func: Function) {
-    let session = Number(skynet_rt.command("TIMEOUT", ti).result);
+    let session = Number(skynet_rt.command("TIMEOUT", ti));
     assert(session);
     assert(!session_id_callback.has(session));
     session_id_callback.set(session, [func, func]);
@@ -181,7 +181,7 @@ export function timeout(ti: number, func: Function) {
 
 export async function sleep(ti: number, token?: number) {
     token = token || gen_token();
-    let session = Number(skynet_rt.command("TIMEOUT", ti).result);
+    let session = Number(skynet_rt.command("TIMEOUT", ti));
     sleep_session.set(token, session);
 
     let promise = new Promise((resolve, reject) => {
@@ -526,8 +526,8 @@ export function term(service: SERVICE_ADDR) {
 
 export function launch(...params: (number|string)[]) {
     let ret = skynet_rt.command("LAUNCH", params.join(" "))
-	if (ret && ret.result) {
-		return parseInt(ret.result.slice(1), 16)
+	if (ret) {
+		return parseInt(ret.slice(1), 16)
     }
 }
 

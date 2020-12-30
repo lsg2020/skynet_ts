@@ -1,23 +1,18 @@
 use crate::error::AnyError;
-use crate::serde_json;
-use crate::serde_json::json;
-use crate::serde_json::Value;
 use crate::JsRuntime;
 use crate::JsRuntimeState;
 use crate::OpState;
 use crate::ZeroCopyBuf;
 use crate::BufVec;
-use serde::Deserialize;
 use std::cell::RefCell;
 use std::rc::Rc;
 use rusty_v8 as v8;
 
 pub fn init(rt: &mut JsRuntime) {
-    super::reg_json_sync(rt, "op_skynet_command", op_skynet_command);
-    super::reg_json_sync(rt, "op_skynet_send", op_skynet_send);
-    super::reg_json_sync(rt, "op_skynet_send_name", op_skynet_send_name);
-    super::reg_json_sync(rt, "op_skynet_error", op_skynet_error);
-    //super::reg_json_sync(rt, "op_skynet_now", op_skynet_now);
+    rt.register_op("op_skynet_command", op_skynet_command);
+    rt.register_op("op_skynet_send", op_skynet_send);
+    rt.register_op("op_skynet_send_name", op_skynet_send_name);    
+    rt.register_op("op_skynet_error", op_skynet_error);
     rt.register_op("op_skynet_now", op_skynet_now_raw);
     rt.register_op("op_skynet_genid", op_skynet_genid);
     rt.register_op("op_skynet_fetch_message", op_skynet_fetch_message);
@@ -38,53 +33,40 @@ pub fn init(rt: &mut JsRuntime) {
     rt.register_op("op_skynet_socket_nodelay", op_skynet_socket_nodelay);
 }
 
-#[derive(Deserialize)]
-#[serde()]
-struct CommandArgs {
-    cmd: String,
-    param: Option<String>,
-}
 pub fn op_skynet_command(
-    state: &mut OpState,
-    args: Value,
-    _zero_copy: &mut [ZeroCopyBuf],
-) -> Result<Value, AnyError> {
-    let args: CommandArgs = serde_json::from_value(args)?;
+    state: Rc<RefCell<OpState>>,
+    _s: &mut JsRuntimeState,
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let state = &mut state.borrow_mut();
+    let cmd = crate::get_args!(scope, v8::String, args, 1).to_rust_string_lossy(scope);
+    let param = crate::get_args!(scope, v8::String, args, 2).to_rust_string_lossy(scope);
 
-    let cmd = std::ffi::CString::new(args.cmd).unwrap();
-    let result = unsafe {
-        match args.param {
-            Some(param) => {
-                let param = std::ffi::CString::new(param).unwrap();
-                crate::skynet_command(state.skynet, cmd.as_ptr(), param.as_ptr())
-            }
-            None => crate::skynet_command(state.skynet, cmd.as_ptr(), std::ptr::null()),
-        }
-    };
+    let cmd = std::ffi::CString::new(cmd).unwrap();
+    let param = std::ffi::CString::new(param).unwrap();
+    let result = unsafe { crate::skynet_command(state.skynet, cmd.as_ptr(), param.as_ptr()) };
 
-    if result == std::ptr::null() {
-        Ok(json!({}))
-    } else {
+    if result != std::ptr::null() {
         let r = unsafe { String::from(std::ffi::CStr::from_ptr(result).to_str().unwrap()) };
-        Ok(json!({ "result": r }))
+        let v8_ret = v8::String::new(scope, &r).unwrap().into();
+        rv.set(v8_ret);
     }
 }
 
-#[derive(Deserialize)]
-#[serde()]
-struct ErrorArgs {
-    error: String,
-}
 pub fn op_skynet_error(
-    state: &mut OpState,
-    args: Value,
-    _zero_copy: &mut [ZeroCopyBuf],
-) -> Result<Value, AnyError> {
-    let args: ErrorArgs = serde_json::from_value(args)?;
+    state: Rc<RefCell<OpState>>,
+    _s: &mut JsRuntimeState,
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue,
+) {
+    let state = &mut state.borrow_mut();
+    let err = crate::get_args!(scope, v8::String, args, 1).to_rust_string_lossy(scope);
 
-    let error = std::ffi::CString::new(args.error).unwrap();
+    let error = std::ffi::CString::new(err).unwrap();
     unsafe { crate::skynet_error(state.skynet, error.as_ptr()) };
-    Ok(json!({}))
 }
 
 fn merge_bufs(zero_copy: &[ZeroCopyBuf]) -> (*const libc::c_void, libc::size_t) {
@@ -105,71 +87,102 @@ fn merge_bufs(zero_copy: &[ZeroCopyBuf]) -> (*const libc::c_void, libc::size_t) 
     return (dest, sz);
 }
 
-#[derive(Deserialize)]
-#[serde()]
-struct SendArgs {
-    dest: libc::c_uint,
-    ptype: libc::c_int,
-    session: libc::c_int,
-}
 pub fn op_skynet_send(
-    state: &mut OpState,
-    args: Value,
-    zero_copy: &mut [ZeroCopyBuf],
-) -> Result<Value, AnyError> {
-    let args: SendArgs = serde_json::from_value(args)?;
-    let (msg_buf, msg_sz) = merge_bufs(zero_copy);
+    state: Rc<RefCell<OpState>>,
+    _s: &mut JsRuntimeState,
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let dest = crate::get_args!(scope, v8::Integer, args, 1).value() as libc::c_uint;
+    let ptype = crate::get_args!(scope, v8::Integer, args, 2).value() as libc::c_int;
+    let session = crate::get_args!(scope, v8::Integer, args, 3).value() as libc::c_int;
 
+    let buf_iter = (4..args.length()).map(|idx| {
+        v8::Local::<v8::ArrayBufferView>::try_from(args.get(idx))
+            .map(|view| {
+                ZeroCopyBuf::new(scope, view)
+            })
+            .map_err(|err| {
+                let msg = format!("Invalid argument at position {}: {}", idx, err);
+                let msg = v8::String::new(scope, &msg).unwrap();
+                v8::Exception::type_error(scope, msg)
+            })
+    });
+
+    let mut bufs: BufVec = match buf_iter.collect::<Result<_, _>>() {
+        Ok(bufs) => bufs,
+        Err(exc) => {
+            scope.throw_exception(exc);
+            return;
+        }
+    };
+
+    let (msg_buf, msg_sz) = merge_bufs(&mut bufs);
+
+    let state = &mut state.borrow_mut();
     let session = unsafe {
         crate::skynet_send(
             state.skynet,
             0,
-            args.dest,
-            args.ptype | crate::PTYPE_TAG_DONTCOPY,
-            args.session,
+            dest,
+            ptype | crate::PTYPE_TAG_DONTCOPY,
+            session,
             msg_buf,
             msg_sz,
         )
     };
-    Ok(json!({ "session": session }))
+    let v8_session = v8::Integer::new(scope, session as i32).into();
+    rv.set(v8_session);
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SendNameArgs {
-    name: String,
-    ptype: libc::c_int,
-    session: libc::c_int,
-}
 pub fn op_skynet_send_name(
-    state: &mut OpState,
-    args: Value,
-    zero_copy: &mut [ZeroCopyBuf],
-) -> Result<Value, AnyError> {
-    let args: SendNameArgs = serde_json::from_value(args)?;
-    let (msg_buf, msg_sz) = merge_bufs(zero_copy);
+    state: Rc<RefCell<OpState>>,
+    _s: &mut JsRuntimeState,
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let name = crate::get_args!(scope, v8::String, args, 1).to_rust_string_lossy(scope);
+    let ptype = crate::get_args!(scope, v8::Integer, args, 2).value() as libc::c_int;
+    let session = crate::get_args!(scope, v8::Integer, args, 3).value() as libc::c_int;
 
+    let buf_iter = (4..args.length()).map(|idx| {
+        v8::Local::<v8::ArrayBufferView>::try_from(args.get(idx))
+            .map(|view| {
+                ZeroCopyBuf::new(scope, view)
+            })
+            .map_err(|err| {
+                let msg = format!("Invalid argument at position {}: {}", idx, err);
+                let msg = v8::String::new(scope, &msg).unwrap();
+                v8::Exception::type_error(scope, msg)
+            })
+    });
+
+    let mut bufs: BufVec = match buf_iter.collect::<Result<_, _>>() {
+        Ok(bufs) => bufs,
+        Err(exc) => {
+            scope.throw_exception(exc);
+            return;
+        }
+    };
+
+    let (msg_buf, msg_sz) = merge_bufs(&mut bufs);
+
+    let state = &mut state.borrow_mut();
     let session = unsafe {
         crate::skynet_sendname(
             state.skynet,
             0,
-            std::ffi::CString::new(args.name).unwrap().as_ptr(),
-            args.ptype | crate::PTYPE_TAG_DONTCOPY,
-            args.session,
+            std::ffi::CString::new(name).unwrap().as_ptr(),
+            ptype | crate::PTYPE_TAG_DONTCOPY,
+            session,
             msg_buf,
             msg_sz,
         )
     };
-    Ok(json!({ "session": session }))
-}
-
-pub fn _op_skynet_now(
-    _state: &mut OpState,
-    _args: Value,
-    _zero_copy: &mut [ZeroCopyBuf],
-) -> Result<Value, AnyError> {
-    let now = unsafe { crate::skynet_now() };
-    Ok(json!(now))
+    let v8_session = v8::Integer::new(scope, session as i32).into();
+    rv.set(v8_session);
 }
 
 pub fn op_skynet_now_raw(
@@ -517,17 +530,17 @@ pub fn op_skynet_socket_send(
     let msg = crate::get_args!(scope, v8::BigInt, args, 2).u64_value().0;
     let sz = crate::get_args!(scope, v8::Integer, args, 3).value();
 
-    let mut buffer = Box::new(crate::socket_sendbuffer {
+    let mut buffer = crate::socket_sendbuffer {
         id: id as libc::c_int,
         msg_type: 0 as libc::c_int,
         buffer: msg as *const u8,
         sz: sz as libc::size_t,
-    });
+    };
 
     let err = unsafe {
         crate::skynet_socket_sendbuffer(
             state.skynet,
-            &mut *buffer,
+            &mut buffer,
         )
     };
 
@@ -548,17 +561,17 @@ pub fn op_skynet_socket_send_lowpriority(
     let msg = crate::get_args!(scope, v8::BigInt, args, 2).u64_value().0;
     let sz = crate::get_args!(scope, v8::Integer, args, 3).value();
 
-    let mut buffer = Box::new(crate::socket_sendbuffer {
+    let mut buffer = crate::socket_sendbuffer {
         id: id as libc::c_int,
         msg_type: 0 as libc::c_int,
         buffer: msg as *const u8,
         sz: sz as libc::size_t,
-    });
+    };
 
     let err = unsafe {
         crate::skynet_socket_sendbuffer_lowpriority(
             state.skynet,
-            &mut *buffer,
+            &mut buffer,
         )
     };
 
@@ -580,18 +593,18 @@ pub fn op_skynet_socket_sendto(
     let msg = crate::get_args!(scope, v8::BigInt, args, 3).u64_value().0;
     let sz = crate::get_args!(scope, v8::Integer, args, 4).value();
 
-    let mut buffer = Box::new(crate::socket_sendbuffer {
+    let mut buffer = crate::socket_sendbuffer {
         id: id as libc::c_int,
         msg_type: 0 as libc::c_int,
         buffer: msg as *const u8,
         sz: sz as libc::size_t,
-    });
+    };
 
     let err = unsafe {
         crate::skynet_socket_udp_sendbuffer(
             state.skynet,
             std::ffi::CString::new(address).unwrap().as_ptr(),
-            &mut *buffer,
+            &mut buffer,
         )
     };
 

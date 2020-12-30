@@ -2,33 +2,33 @@
     const core = window.Deno.core;
 
     function command(cmd, param = "") {
-        return core.jsonOpSync("op_skynet_command", { cmd: cmd, param: String(param) });
+        return core.rawOpSync("op_skynet_command", cmd, String(param));
     }
 
     function addresscommand(cmd, param = "") {
         let r = command(cmd, param);
-        if (!r || !r.result || r.result[0] != ":") {
+        if (!r || r[0] != ":") {
             return 0;
         }
 
-        return parseInt(r.result.slice(1), 16)
+        return parseInt(r.slice(1), 16)
     }
 
     function intcommand(cmd, param = "") {
         let r = command(cmd, param);
-        if (!r || !r.result) {
+        if (!r) {
             return 0;
         }
 
-        return Number(r.result)
+        return Number(r)
     }
 
     function get_env(key, default_str) {
         let r = command("GETENV", key);
-        if (!r || !r.result) {
+        if (!r) {
             return default_str;
         }
-        return r.result;
+        return r;
     }
 
     function set_env(key, value) {
@@ -43,11 +43,9 @@
         }
 
         if (typeof (addr) == "number") {
-            let r = core.jsonOpSync("op_skynet_send", { dest: addr, ptype: ptype, session: session }, ...bufs);
-            session = r.session;
+            session = core.rawOpSync("op_skynet_send", addr, ptype, session, ...bufs);
         } else {
-            let r = core.jsonOpSync("op_skynet_send_name", { name: addr, ptype: ptype, session: session }, ...bufs);
-            session = r.session;
+            session = core.rawOpSync("op_skynet_send_name", addr, ptype, session, ...bufs);
         }
         if (session < 0) {
             if (session == -2) {
@@ -64,7 +62,7 @@
     }
 
     function error(err) {
-        core.jsonOpSync("op_skynet_error", { error: err });
+        core.rawOpSync("op_skynet_error", err);
     }
 
     function exit() {
