@@ -350,7 +350,7 @@ export function sendto(id: SOCKET_ID, address: string, buffer: Uint8Array|MSGPTR
 }
 
 type BUFFER_NODE = {
-    msg: MSGPTR,
+    buffer?: Uint8Array,
     sz: number,
     next?: BUFFER_NODE,
 }
@@ -510,8 +510,10 @@ function _pack_push(sb: SOCKET_BUFFER, data: MSGPTR, sz: number) {
         buffer_pool[tsz] = pool;
     }
     buffer_pool[0] = free_node.next!;
-    free_node.msg = data;
+    free_node.buffer = new Uint8Array(sz);
     free_node.sz = sz;
+    skynet.fetch_message(data, sz, 0, false, free_node.buffer);
+    skynet_rt.free(data);
     free_node.next = undefined;
     if (!sb.head) {
         skynet.assert(!sb.tail);
@@ -532,8 +534,7 @@ function _node_free(sb: SOCKET_BUFFER) {
         sb.tail = undefined;
     }
     free_node.next = buffer_pool[0];
-    skynet_rt.free(free_node.msg);
-    free_node.msg = 0n;
+    free_node.buffer = undefined;
     free_node.sz = 0;
     buffer_pool[0] = free_node;
 }
@@ -543,13 +544,13 @@ function _pop_message(sb: SOCKET_BUFFER, sz: number, skip: number, buffer?: Uint
     let read_sz = sz;
     let current = sb.head!;
     if (sz < current.sz - sb.offset) {
-        let msg = _pack_fetch(current.msg + BigInt(sb.offset), sz - skip, buffer, offset);
+        let msg = _pack_fetch(current.buffer!, sb.offset, sz - skip, buffer, offset);
         sb.offset += sz;
         sb.size -= read_sz;
         return msg;
     }
     if (sz == current.sz - sb.offset) {
-        let msg = _pack_fetch(current.msg + BigInt(sb.offset), sz - skip, buffer, offset);
+        let msg = _pack_fetch(current.buffer!, sb.offset, sz - skip, buffer, offset);
         _node_free(sb);
         sb.size -= read_sz;
         return msg;
@@ -561,7 +562,7 @@ function _pop_message(sb: SOCKET_BUFFER, sz: number, skip: number, buffer?: Uint
         if (bytes >= sz) {
             if (sz > skip) {
                 let fetch_sz = sz - skip;
-                _pack_fetch(current.msg + BigInt(sb.offset), fetch_sz, msg, offset);
+                _pack_fetch(current.buffer!, sb.offset, fetch_sz, msg, offset);
                 offset += fetch_sz;
             }
             sb.offset += sz;
@@ -573,7 +574,7 @@ function _pop_message(sb: SOCKET_BUFFER, sz: number, skip: number, buffer?: Uint
         let real_sz = sz - skip;
         if (real_sz > 0) {
             let fetch_sz = (real_sz < bytes) ? real_sz : bytes;
-            _pack_fetch(current.msg + BigInt(sb.offset), fetch_sz, msg, offset);
+            _pack_fetch(current.buffer!, sb.offset, fetch_sz, msg, offset);
             offset += fetch_sz;
         }
         _node_free(sb);
@@ -611,9 +612,9 @@ function _read_all(sb: SOCKET_BUFFER, skip: number = 0, peek: boolean = false, b
 
     let current = sb.head;
     while (current) {
-        let pack_sz = current.sz - sb_offset;
+        let pack_sz = current.buffer!.length - sb_offset;
         if (skip < pack_sz) {
-            _pack_fetch(current.msg + BigInt(sb_offset + skip), pack_sz - skip, msg, offset);
+            _pack_fetch(current.buffer!, sb_offset + skip, pack_sz - skip, msg, offset);
             offset += pack_sz - skip;
         }
         skip = skip > pack_sz ? skip - pack_sz : 0;
@@ -697,7 +698,6 @@ function _pool_new(sz: number) {
     let pool: BUFFER_NODE|undefined = undefined;
     for (let i = 1; i < sz; i++) {
         pool = {
-            msg: 0n,
             sz: 0,
             next: pool,
         }
@@ -711,8 +711,18 @@ function _pack_drop(data: MSGPTR, size: number) {
 function _pack_fetch_init(sz: number, buffer?: Uint8Array, buffer_offset?: number) {
     return skynet.fetch_message(0n, sz, buffer_offset, true, buffer);
 }
-function _pack_fetch(msg: MSGPTR, sz: number, buffer?: Uint8Array, buffer_offset?: number) {
-    return skynet.fetch_message(msg, sz, buffer_offset, false, buffer);
+function _pack_fetch(msg: Uint8Array, msg_offset: number, sz: number, buffer?: Uint8Array, buffer_offset?: number) {
+    //return skynet.fetch_message(msg, sz, buffer_offset, false, buffer);
+    buffer = skynet.fetch_message(0n, sz, buffer_offset, true, buffer);
+    if (sz < 64) {
+        buffer_offset = buffer_offset || 0;
+        for (let i=0; i<sz; i++) {
+            buffer[buffer_offset+i] = msg[msg_offset + i];
+        }
+    } else {
+        buffer.set(msg.subarray(msg_offset, msg_offset + sz), buffer_offset || 0);
+    }
+    return buffer;
 }
 function _close(id: SOCKET_ID) {
     skynet_rt.socket_close(id);

@@ -123,7 +123,12 @@ impl v8::inspector::V8InspectorClientImpl for Inspector {
         if self.resume_proxy_addr.is_none() {
             return;
         }
-        let _ = reqwest::blocking::get(self.resume_proxy_addr.as_ref().unwrap().as_str());
+        // let r = reqwest::blocking::get(self.resume_proxy_addr.as_ref().unwrap().as_str());
+        let client = reqwest::blocking::Client::builder().timeout(std::time::Duration::from_secs(5)).build().unwrap();
+        let r = client.get(self.resume_proxy_addr.as_ref().unwrap().as_str()).send();
+        if let Err(err) = r {
+            println!("v8 inspector quit_message_loop_on_pause error:{}", err);
+        }
     }
 
     fn run_if_waiting_for_debugger(&mut self, _context_group_id: i32) {}
