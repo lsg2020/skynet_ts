@@ -78,6 +78,10 @@ export module sha1
         {
             source = <ArrayBuffer> bufferOrString;
         }
+        else if (bufferOrString instanceof Uint8Array) 
+        {
+            source = (<Uint8Array>bufferOrString).buffer;
+        }
         else
         {
             source = string2ArrayBuffer(String(bufferOrString));

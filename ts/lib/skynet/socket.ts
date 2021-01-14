@@ -349,6 +349,10 @@ export function sendto(id: SOCKET_ID, address: string, buffer: Uint8Array|MSGPTR
     return !err;
 }
 
+export function nodelay(id: SOCKET_ID) {
+    skynet_rt.socket_nodelay(id)
+}
+
 type BUFFER_NODE = {
     buffer?: Uint8Array,
     sz: number,
