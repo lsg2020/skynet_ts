@@ -41,7 +41,7 @@ export function decode_str(chunk: Uint8Array, offset: number, n: number): [strin
 }
 
 export function sub_str(buffer: Uint8Array, start?: number, end?: number) {
-    return String.fromCharCode.apply(null, Array.from(buffer.slice(start, end)))
+    return String.fromCharCode.apply(null, Array.from(buffer.subarray(start, end)))
 }
 
 export function encode_uint8_be(chunk: Uint8Array, offset: number, value: number) {
@@ -116,6 +116,10 @@ export class encoder {
             this._buffer = encoder.shared_buffer;
         } else {
             this._buffer = new Uint8Array(encoder.init_buffer_sz);
+        }
+
+        for (let i=0; i<this._buffer.length; i++) {
+            this._buffer[i] = 0;
         }
     }
 
@@ -236,6 +240,9 @@ export class encoder {
 
     padding(n: number) {
         this._ensure_write_sz(n);
+        for (let i=this._pos; i<this._pos+n; i++) {
+            this._buffer[i] = 0;
+        }
         this._pos += n;
     }
 

@@ -54,7 +54,7 @@ enum FieldType {
     ERR = "ERR",
     EOF = "EOF",
     DATA = "DATA",
-}
+};
 
 const COM_QUERY = new Uint8Array([0x03]);
 const COM_PING = new Uint8Array([0x0e]);
@@ -62,8 +62,8 @@ const COM_STMT_PREPARE = new Uint8Array([0x16]);
 const COM_STMT_EXECUTE = new Uint8Array([0x17]);
 const COM_STMT_CLOSE = new Uint8Array([0x19]);
 const COM_STMT_RESET = new Uint8Array([0x1a]);
-const CURSOR_TYPE_NO_CURSOR = 0x00
-const SERVER_MORE_RESULT_EXISTS = 8
+const CURSOR_TYPE_NO_CURSOR = 0x00;
+const SERVER_MORE_RESULT_EXISTS = 8;
 
 let converters = new Map([
     [0x01, Number],
@@ -75,7 +75,7 @@ let converters = new Map([
     [0x09, Number],
     [0x0d, Number],
     [0xf6, Number],
-])
+]);
 
 export type Options = {
     host: string,
@@ -129,12 +129,12 @@ export class Mysql {
     }
 
     max_packet_size = 0;
-    packet_no = 0;
     protocol_ver = 0;
     server_ver = "";
     server_capabilities = 0;
     server_lang = 0;
     server_status = 0;
+    private packet_no = 0;
     private compact = false;
     private channel: socket_channel.Channel;
     private query_resp?: (sock: socket_channel.Channel) => Promise<[boolean, any]>;
@@ -214,6 +214,34 @@ export class Mysql {
         return channel.request(query_packet, this.execute_resp);
     }
 
+    async stmt_reset(stmt: any) {
+        let packet = this._packet_alloc();
+        packet.buffer(COM_STMT_RESET, 0);
+        packet.uint32_le(stmt.prepare_id);
+        let query = this._compose_packet(packet);
+        if (!this.query_resp) {
+            this.query_resp = this._query_resp();
+        }
+        return this.channel.request(query, this.query_resp);
+    }
+
+    async stmt_close(stmt: any) {
+        let packet = this._packet_alloc();
+        packet.buffer(COM_STMT_CLOSE, 0);
+        packet.uint32_le(stmt.prepare_id);
+        let query = this._compose_packet(packet);
+        return this.channel.request(query);
+    }
+
+    async ping() {
+        let packet = this._compose_com_packet(COM_PING);
+        let channel = this.channel;
+        if (!this.query_resp) {
+            this.query_resp = this._query_resp();
+        }
+        return channel.request(packet, this.query_resp);
+    }
+
     private static _from_length_coded_bin(data: Uint8Array, pos: number): [number, number?] {
         let first = pack.decode_uint8_le(data, pos);
         if (first === undefined) {
@@ -259,39 +287,36 @@ export class Mysql {
         return;
     }
 
-    private static _from_length_coded_buffer(data: Uint8Array, pos: number): [number, Uint8Array?] {
+    private static _from_length_coded_buffer(data: Uint8Array, pos: number): [number, number] {
         let len: number|undefined;
         [pos, len] = Mysql._from_length_coded_bin(data, pos);
         if (len === undefined) {
-            return [pos, undefined];
+            return [pos, pos];
         }
-        return [pos + len, data.slice(pos, pos+len)]
+        return [pos, pos + len]
     }
 
-    private static _from_length_coded_str(data: Uint8Array, pos: number): [number, string?] {
-        let [index, value] = Mysql._from_length_coded_buffer(data, pos);
-        if (!value) {
-            return [index, undefined];
-        }
-        return [index, pack.sub_str(value)];
+    private static _from_length_coded_str(data: Uint8Array, pos: number): [number, string] {
+        let [start, end] = Mysql._from_length_coded_buffer(data, pos);
+        return [end, pack.sub_str(data, start, end)];
     }
 
-    private _compose_packet(...reqs: Uint8Array[]) {
+    private _packet_alloc(use_shared: boolean = false) {
+        let packet = new pack.encoder(undefined, use_shared);
+        packet.padding(4);
+        return packet;
+    }
+    private _compose_packet(packet: pack.encoder) {
         this.packet_no++;
         if (this.packet_no > 255) {
             this.packet_no = 0;
         }
-        let size = 0;
-        reqs.forEach((req) => size += req.length);
-        let packet = new Uint8Array(3+1+size);
+        let buffer = packet.finish();
+        let size = buffer.length - 4;
         let pos = 0;
-        pack.encode_uint_le(packet, pos, size, 3); pos += 3;
-        pack.encode_uint8_le(packet, pos, this.packet_no); pos += 1;
-        reqs.forEach((req) => {
-            packet.set(req, pos);
-            pos += req.length;
-        });
-        return packet;
+        pack.encode_uint_le(buffer, pos, size, 3); pos += 3;
+        pack.encode_uint8_le(buffer, pos, this.packet_no); pos += 1;
+        return buffer;
     }
 
     private async _recv_packet(sock: socket_channel.Channel): Promise<[Uint8Array, FieldType]> {
@@ -436,11 +461,14 @@ export class Mysql {
 
         cols.forEach((col) => {
             let value: any;
-            [pos, value] = Mysql._from_length_coded_buffer(data, pos);
-            if (value !== undefined) {
+            let start: number;
+            [start, pos] = Mysql._from_length_coded_buffer(data, pos);
+            if (start !== undefined) {
                 let conv = converters.get(col.type);
                 if (conv) {
-                    value = conv(String.fromCharCode.apply(null, Array.from(value)));
+                    value = conv(pack.sub_str(data, start, pos));
+                } else {
+                    value = data.slice(start, pos);
                 }
             }
 
@@ -465,7 +493,7 @@ export class Mysql {
 
         return this._parse_field_packet(packet);
     }
-        
+
     private _recv_decode_packet_resp() {
         return async (sock: socket_channel.Channel): Promise<[boolean, Uint8Array|string]> => {
             let packet, type;
@@ -528,7 +556,7 @@ export class Mysql {
             //let scramble = scramble1 + scramble_part2;
             let token = this._compute_token(password, scramble1, scramble_part2);
             let client_flags = 260047;
-            let req = new pack.encoder();
+            let req = this._packet_alloc(true);
             req.uint32_le(client_flags);
             req.uint32_le(this.max_packet_size);
             req.uint8_le(charset);
@@ -537,7 +565,7 @@ export class Mysql {
             req.buffer(token, 1);
             req.cstring(database);
 
-            let auth_packet = this._compose_packet(req.finish());
+            let auth_packet = this._compose_packet(req);
             await sockchannel.request(auth_packet, dispatch_resp);
             if (on_connect) {
                 on_connect(this);
@@ -547,7 +575,10 @@ export class Mysql {
 
     private _compose_com_packet(type: Uint8Array, ...reqs: Uint8Array[]) {
         this.packet_no = -1;
-        return this._compose_packet(type, ...reqs);
+        let packet = this._packet_alloc();
+        packet.buffer(type, 0);
+        reqs.forEach((req) => packet.buffer(req, 0));
+        return this._compose_packet(packet);
     }
 
     private async _read_result(sock: socket_channel.Channel): Promise<[PacketResponse|Array<Row>, boolean]> {
@@ -764,7 +795,7 @@ export class Mysql {
         }
 
         this.packet_no = -1;
-        let cmd_packet = new pack.encoder();
+        let cmd_packet = this._packet_alloc();
         cmd_packet.buffer(COM_STMT_EXECUTE, 0);
         cmd_packet.uint32_le(stmt.prepare_id);
         cmd_packet.uint8_le(cursor_type);
@@ -803,7 +834,7 @@ export class Mysql {
             }
         }
 
-        return this._compose_packet(cmd_packet.finish());
+        return this._compose_packet(cmd_packet);
     }
 
     private static _get_datetime(data: Uint8Array, pos: number): [number, string] {
@@ -824,7 +855,12 @@ export class Mysql {
             pos += len!;
         }        
         return [pos, value];
-    }    
+    }
+    private static _get_buffer(data: Uint8Array, pos: number): [number, Uint8Array] {
+        let start: number;
+        [start, pos] = Mysql._from_length_coded_buffer(data, pos);
+        return [pos, data.slice(start, pos)];
+    }
     private static _binary_parse = new Map([
         [0x01, (data: Uint8Array, pos: number): [number, any?] => {
             return [pos+1, pack.decode_uint8_le(data, pos)];
@@ -851,14 +887,14 @@ export class Mysql {
             return [pos+3, pack.decode_uint_le(data, pos, 3)];
         }],
         [0x0c, Mysql._get_datetime],
-        [0x0f, Mysql._from_length_coded_buffer],
-        [0x10, Mysql._from_length_coded_buffer],
-        [0xf9, Mysql._from_length_coded_buffer],
-        [0xfa, Mysql._from_length_coded_buffer],
-        [0xfb, Mysql._from_length_coded_buffer],
-        [0xfc, Mysql._from_length_coded_buffer],
-        [0xfd, Mysql._from_length_coded_buffer],
-        [0xfe, Mysql._from_length_coded_buffer],
+        [0x0f, Mysql._get_buffer],
+        [0x10, Mysql._get_buffer],
+        [0xf9, Mysql._get_buffer],
+        [0xfa, Mysql._get_buffer],
+        [0xfb, Mysql._get_buffer],
+        [0xfc, Mysql._get_buffer],
+        [0xfd, Mysql._get_buffer],
+        [0xfe, Mysql._get_buffer],
     ]);
     private _parse_row_data_binary(data: Uint8Array, cols: Array<Col>, compact: boolean) {
         let ncols = cols.length;
