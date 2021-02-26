@@ -171,8 +171,8 @@ impl JsRuntime {
             let isolate = v8::Isolate::new(params);
             let mut isolate = JsRuntime::setup_isolate(isolate);
             {
-                let _locker = v8::Locker::new(&mut isolate, std::ptr::null_mut());
                 let _isolate_scope = v8::IsolateScope::new(&mut isolate);
+                let _locker = v8::Locker::new(&mut isolate, std::ptr::null_mut());
                 let _auto_check = IsolateAutoCheck::new(&mut isolate);
                 let scope = &mut v8::HandleScope::new(&mut isolate);
                 let context = if snapshot_loaded {
