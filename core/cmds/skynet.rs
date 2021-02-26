@@ -236,8 +236,8 @@ pub fn op_skynet_fetch_message(
     let offset = crate::get_args!(scope, v8::Integer, args, 4).value() as libc::size_t;
 
     if sz > 0 {
-        let buf = unsafe { crate::bindings::get_backing_store_slice_mut(&buffer, 0, buffer.byte_length()) };
-        buf[offset..sz+offset].copy_from_slice(unsafe { std::slice::from_raw_parts(msg as *const u8, sz) });
+        let buf = unsafe { crate::bindings::get_backing_store_slice_mut(&buffer, offset, sz+offset) };
+        buf.copy_from_slice(unsafe { std::slice::from_raw_parts(msg as *const u8, sz) });
     }
 
     let v8_sz = v8::Integer::new(scope, sz as i32).into();
