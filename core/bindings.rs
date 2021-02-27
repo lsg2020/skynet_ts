@@ -718,13 +718,14 @@ pub fn module_resolve_callback<'s>(
         .expect("ModuleInfo not found")
         .name
         .to_string();
-    let len_ = referrer.get_module_requests_length();
-
+    let module_requests = referrer.get_module_requests();
     let specifier_str = specifier.to_rust_string_lossy(scope);
 
-    for i in 0..len_ {
-        let req = referrer.get_module_request(i);
-        let req_str = req.to_rust_string_lossy(scope);
+    for i in 0..module_requests.length() {
+        let req = v8::Local::<v8::ModuleRequest>::try_from(
+            module_requests.get(scope, i).unwrap(),
+        ).unwrap();
+        let req_str = req.get_specifier().to_rust_string_lossy(scope);
 
         if req_str == specifier_str {
             let id = state.module_resolve_cb(&req_str, referrer_id);

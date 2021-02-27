@@ -471,8 +471,12 @@ impl JsRuntime {
 
         let mut state = state_rc.borrow_mut();
         let mut import_specifiers: Vec<ModuleSpecifier> = vec![];
-        for i in 0..module.get_module_requests_length() {
-            let import_specifier = module.get_module_request(i).to_rust_string_lossy(tc_scope);
+        let module_requests = module.get_module_requests();
+        for i in 0..module_requests.length() {
+            let module_request = v8::Local::<v8::ModuleRequest>::try_from(
+                module_requests.get(tc_scope, i).unwrap(),
+            ).unwrap();
+            let import_specifier = module_request.get_specifier().to_rust_string_lossy(tc_scope);
             // let module_specifier = Self::module_resolve(&import_specifier, &Some(name.to_owned()), &mut state);
             import_specifiers.push(ModuleSpecifier::new(import_specifier));
         }
