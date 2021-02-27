@@ -168,7 +168,7 @@ pub extern "C" fn dispatch_cb(
 ) -> c_int {
     let ctx = unsafe { &mut *ctx };
 
-    let custom_archive = ctx.isolate.custom_archive;
+    let custom_archive = if ctx.isolate.inspector_session_len > 0 { ctx.isolate.custom_archive } else { ctx.isolate.empty_archive };
     let _isolate_scope = v8::IsolateScope::new(ctx.isolate.v8_isolate());
     let _locker = v8::Locker::new(ctx.isolate.v8_isolate(), custom_archive);
     let _auto_check = runtime::IsolateAutoCheck::new(ctx.isolate.v8_isolate());

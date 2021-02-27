@@ -52,6 +52,8 @@ pub struct JsRuntime {
     has_snapshotted: bool,
     allocations: IsolateAllocations,
     pub custom_archive: *mut c_void,
+    pub inspector_session_len: usize,
+    pub empty_archive: *mut c_void,
 }
 
 pub struct JsRuntimeState {
@@ -67,6 +69,7 @@ pub struct JsRuntimeState {
     pub module_search_paths: Vec<String>,
     pub module_resolve: HashMap<String, String>,
     pub inspector: Option<Box<Inspector>>,
+    pub runtime: *mut JsRuntime,
 }
 
 impl Drop for JsRuntime {
@@ -197,13 +200,16 @@ impl JsRuntime {
             libc::memset(p, 0, 1024);
             p
         };
-        let mut runtime = Box::new(Self {
+        let runtime = Box::new(Self {
             v8_isolate: Some(isolate),
             snapshot_creator: maybe_snapshot_creator,
             has_snapshotted: false,
             allocations: IsolateAllocations::default(),
             custom_archive: custom_archive,
+            inspector_session_len: 0,
+            empty_archive: std::ptr::null_mut(),
         });
+        let runtime = Box::into_raw(runtime);
 
         let state = JsRuntimeState {
             global_context: Some(global_context),
@@ -218,10 +224,11 @@ impl JsRuntime {
             module_search_paths: Vec::new(),
             module_resolve: HashMap::new(),
             inspector: None,
+            runtime: runtime,
         };
 
+        let mut runtime = unsafe { Box::from_raw(runtime) };
         runtime.v8_isolate().set_slot(Rc::new(RefCell::new(state)));
-
         runtime
     }
 
@@ -918,12 +925,18 @@ impl JsRuntimeState {
         let inspector = &mut self.inspector.as_mut().unwrap();
         inspector.sessions.insert(session_id, session);
         inspector.v8_sessions.insert(session_id, v8_session);
+
+        let runtime = unsafe { &mut *self.runtime };
+        runtime.inspector_session_len = inspector.sessions.len();
     }
 
     pub fn inspector_del_session(&mut self, session_id: i64) {
         let inspector = &mut self.inspector.as_mut().unwrap();
         inspector.sessions.remove(&session_id);
         inspector.v8_sessions.remove(&session_id);
+
+        let runtime = unsafe { &mut *self.runtime };
+        runtime.inspector_session_len = inspector.sessions.len();
     }
 
     pub fn set_pause_resume_proxy(&mut self, pause_proxy_addr: &str, resume_proxy_addr: &str) {
