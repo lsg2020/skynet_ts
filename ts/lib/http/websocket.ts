@@ -5,18 +5,7 @@ import * as internal from "http/internal"
 import * as httpd from "http/httpd"
 import * as http_helper from "http/helper"
 import { HEADER_MAP, INTERFACE_TYPE, SOCKET_INTERFACE } from "http/types"
-
-import {
-    decode_str,
-    decode_uint16_be,
-    decode_uint32_be,
-    decode_uint8_be,
-    encode_uint16_be,
-    encode_uint8_be,
-    encode_uint32_be,
-    encode_uint64_be,
-    decode_uint_be,
-} from "pack"
+import * as pack from "pack"
 
 
 let GLOBAL_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
@@ -128,7 +117,7 @@ async function _write_handshake(ws: WS_OBJ, host: string, url: string, header?: 
     }
 
     sw_key = String.fromCharCode.apply(null, Array.from(crypt.base64decode(sw_key)));
-    if (sw_key != String.fromCharCode.apply(null, Array.from(crypt.sha1.array(key + GLOBAL_GUID)))) {
+    if (sw_key != String.fromCharCode.apply(null, Array.from(crypt.sha1(key + GLOBAL_GUID)))) {
         throw new Error(`websocket handshake invalid Sec-WebSocket-Accept`);
     }
 }
@@ -206,7 +195,7 @@ async function _read_handshake(ws: WS_OBJ, accept_ops?: ACCEPT_OPTIONS): Promise
     }
 
     // response handshake
-    let accept = crypt.base64encode(crypt.sha1.array(sw_key + GLOBAL_GUID));
+    let accept = crypt.base64encode(crypt.sha1(sw_key + GLOBAL_GUID));
     let resp = "HTTP/1.1 101 Switching Protocols\r\n" + 
                 "Upgrade: websocket\r\n" + 
                 "Connection: Upgrade\r\n" +
@@ -229,7 +218,7 @@ function _write_frame(ws: WS_OBJ, op: OP_CODE, payload_data?: Uint8Array, payloa
     let mask = masking_key && 0x80 || 0x00;
 
     let end_pos = SENDBUFFER_PRE_HEADER + payload_len;
-    ws.send_buffer = skynet.fetch_message(0n, end_pos, 0, true, ws.send_buffer || new Uint8Array(BUFFER_INIT_SIZE));
+    ws.send_buffer = skynet.fetch_message(0n, end_pos, 0, ws.send_buffer || new Uint8Array(BUFFER_INIT_SIZE));
     if (payload_data && payload_data != ws.send_buffer) {
         ws.send_buffer.set(payload_data, SENDBUFFER_PRE_HEADER);
     }
@@ -237,7 +226,7 @@ function _write_frame(ws: WS_OBJ, op: OP_CODE, payload_data?: Uint8Array, payloa
     let header_offset = SENDBUFFER_PRE_HEADER;
     if (masking_key) {
         header_offset -= 4;
-        encode_uint32_be(ws.send_buffer, header_offset, masking_key);
+        pack.encode_uint32(ws.send_buffer, header_offset, masking_key);
 
         crypt.xor(ws.send_buffer, SENDBUFFER_PRE_HEADER, end_pos, ws.send_buffer.subarray(header_offset, header_offset + 4));
     }
@@ -245,18 +234,18 @@ function _write_frame(ws: WS_OBJ, op: OP_CODE, payload_data?: Uint8Array, payloa
     // mask set to 0
     if (payload_len < 126) {
         header_offset -= 2;
-        encode_uint8_be(ws.send_buffer, header_offset, v1);
-        encode_uint8_be(ws.send_buffer, header_offset+1, mask | payload_len);
+        pack.encode_uint8(ws.send_buffer, header_offset, v1);
+        pack.encode_uint8(ws.send_buffer, header_offset+1, mask | payload_len);
     } else if (payload_len < 0xffff) {
         header_offset -= 4;
-        encode_uint8_be(ws.send_buffer, header_offset+0, v1);
-        encode_uint8_be(ws.send_buffer, header_offset+1, 126);
-        encode_uint16_be(ws.send_buffer, header_offset+2, payload_len);
+        pack.encode_uint8(ws.send_buffer, header_offset+0, v1);
+        pack.encode_uint8(ws.send_buffer, header_offset+1, 126);
+        pack.encode_uint16(ws.send_buffer, header_offset+2, payload_len);
     } else {
         header_offset -= 10;
-        encode_uint8_be(ws.send_buffer, header_offset+0, v1);
-        encode_uint8_be(ws.send_buffer, header_offset+1, 127);
-        encode_uint64_be(ws.send_buffer, header_offset+2, payload_len);
+        pack.encode_uint8(ws.send_buffer, header_offset+0, v1);
+        pack.encode_uint8(ws.send_buffer, header_offset+1, 127);
+        pack.encode_safe_uint64(ws.send_buffer, header_offset+2, payload_len);
     }
 
     ws.socket.write(ws.send_buffer.subarray(header_offset, end_pos));
@@ -266,7 +255,7 @@ function _read_close(payload_data: Uint8Array, payload_len: number): [number, st
     let code = 0;
     let reason = "";
     if (payload_len >= 2) {
-        code = decode_uint16_be(payload_data, 0);
+        code = pack.decode_uint16(payload_data, 0);
         reason = String.fromCharCode.apply(null, Array.from(payload_data.slice(2, payload_len)));
     }
     return [code, reason];
@@ -279,8 +268,8 @@ async function _read_frame(ws: WS_OBJ, buffer?: Uint8Array, offset: number = 0):
         buffer = ws.recv_buffer;
     }
     let [header, header_sz] = await ws.socket.read(2);
-    let v1 = decode_uint8_be(header, 0);
-    let v2 = decode_uint8_be(header, 1);
+    let v1 = pack.decode_uint8(header, 0);
+    let v2 = pack.decode_uint8(header, 1);
     let fin = ((v1 & 0x80) != 0);
     
     let op = v1 & 0x0f;
@@ -288,10 +277,10 @@ async function _read_frame(ws: WS_OBJ, buffer?: Uint8Array, offset: number = 0):
     let payload_len = (v2 & 0x7f);
     if (payload_len == 126) {
         let [s] = await ws.socket.read(2);
-        payload_len = decode_uint16_be(s, 0);
+        payload_len = pack.decode_uint16(s, 0);
     } else if (payload_len == 127) {
         let [s] = await ws.socket.read(8);
-        payload_len = decode_uint_be(s, 0, 8);
+        payload_len = pack.decode_uint(s, 0, 8);
     }
 
     if (ws.mode == WS_MODULE.SERVER && payload_len > MAX_FRAME_SIZE) {
@@ -533,7 +522,7 @@ export function close(id: number, code?: number, reason: string = "") {
         if (code) {
             let reason_buf = new TextEncoder().encode(reason);
             payload_data = new Uint8Array(2 + reason_buf.length);
-            encode_uint16_be(payload_data, 0, code);
+            pack.encode_uint16(payload_data, 0, code);
             payload_data.set(reason_buf, 2);
         }
         _write_frame(ws_obj, OP_CODE.CLOSE, payload_data, payload_data?payload_data.length:0);

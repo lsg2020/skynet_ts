@@ -74,11 +74,11 @@ import * as socket from "skynet/socket";
 import { utf8 } from "utf8";
 import { 
     decode_str, 
-    decode_uint16_be, 
-    decode_uint32_be, 
-    decode_uint8_be, 
-    encode_uint16_be, 
-    encode_uint8_be 
+    decode_uint16, 
+    decode_uint32, 
+    decode_uint8, 
+    encode_uint16, 
+    encode_uint8 
 } from "pack";
 
 const MAX_DOMAIN_LEN = 1024
@@ -251,12 +251,12 @@ type ANSWER = {
 function pack_header(t: HEADER) {
     let buffer = new Uint8Array(12);
     let offset = 0;
-    encode_uint16_be(buffer, offset, t.tid); offset += 2;
-    encode_uint16_be(buffer, offset, t.flags); offset += 2;
-    encode_uint16_be(buffer, offset, t.qdcount); offset += 2;
-    encode_uint16_be(buffer, offset, t.ancount || 0); offset += 2;
-    encode_uint16_be(buffer, offset, t.nscount || 0); offset += 2;
-    encode_uint16_be(buffer, offset, t.arcount || 0); offset += 2;
+    encode_uint16(buffer, offset, t.tid); offset += 2;
+    encode_uint16(buffer, offset, t.flags); offset += 2;
+    encode_uint16(buffer, offset, t.qdcount); offset += 2;
+    encode_uint16(buffer, offset, t.ancount || 0); offset += 2;
+    encode_uint16(buffer, offset, t.nscount || 0); offset += 2;
+    encode_uint16(buffer, offset, t.arcount || 0); offset += 2;
     return buffer;
 }
 
@@ -270,13 +270,13 @@ function pack_question(name: string, qtype: QTYPE, qclass: QCLASS) {
     let buffer = new Uint8Array(label_len + 1 + 4);
     let offset = 0;
     labels.forEach((label) => {
-        encode_uint8_be(buffer, offset, label.length);
+        encode_uint8(buffer, offset, label.length);
         utf8.write(label, buffer, offset + 1);
         offset += 1 + label.length;
     });
-    encode_uint8_be(buffer, offset++, 0);
-    encode_uint16_be(buffer, offset, qtype); offset += 2;
-    encode_uint16_be(buffer, offset, qclass); offset += 2;
+    encode_uint8(buffer, offset++, 0);
+    encode_uint16(buffer, offset, qtype); offset += 2;
+    encode_uint16(buffer, offset, qclass); offset += 2;
     return buffer;
 }
 
@@ -285,9 +285,9 @@ function unpack_name(chunk: Uint8Array, left: number): [string, number] {
     let jump_pointer;
     let tag, offset, label;
     while (true) {
-        tag = decode_uint8_be(chunk, left); left += 1;
+        tag = decode_uint8(chunk, left); left += 1;
         if ((tag & 0xc0) == 0xc0) {
-            offset = decode_uint16_be(chunk, left - 1); left += 1;
+            offset = decode_uint16(chunk, left - 1); left += 1;
             offset = offset & 0x3fff;
             if (jump_pointer === undefined) {
                 jump_pointer = left;
@@ -322,14 +322,14 @@ let unpack_type = new Map<QTYPE, (ans: ANSWER_ITEM, chunk: Uint8Array, sz: numbe
                 throw new Error(`bad AAAA record value length: ${sz}`);
             }
             let [a, b, c, d, e, f, g, h] = [
-                decode_uint16_be(chunk, 0),
-                decode_uint16_be(chunk, 2),
-                decode_uint16_be(chunk, 4),
-                decode_uint16_be(chunk, 6),
-                decode_uint16_be(chunk, 8),
-                decode_uint16_be(chunk, 10),
-                decode_uint16_be(chunk, 12),
-                decode_uint16_be(chunk, 14),
+                decode_uint16(chunk, 0),
+                decode_uint16(chunk, 2),
+                decode_uint16(chunk, 4),
+                decode_uint16(chunk, 6),
+                decode_uint16(chunk, 8),
+                decode_uint16(chunk, 10),
+                decode_uint16(chunk, 12),
+                decode_uint16(chunk, 14),
             ];
             ans.address = `${a}:${b}:${c}:${d}:${e}:${f}:${g}:${h}`;
         }
@@ -341,9 +341,9 @@ let unpack_type = new Map<QTYPE, (ans: ANSWER_ITEM, chunk: Uint8Array, sz: numbe
                 throw new Error(`bad SRV record value length: ${sz}`);
             }
             [ans.priority, ans.weight, ans.port] = [
-                decode_uint16_be(chunk, 0),
-                decode_uint16_be(chunk, 2),
-                decode_uint16_be(chunk, 4),
+                decode_uint16(chunk, 0),
+                decode_uint16(chunk, 2),
+                decode_uint16(chunk, 4),
             ];
             [ans.target] = unpack_name(chunk, 6);
         }
@@ -371,13 +371,13 @@ function unpack_section(answers: ANSWER_ITEM[], section: number, chunk: Uint8Arr
         let ans: ANSWER_ITEM = {
             section: section,
             name: name,
-            qtype: decode_uint16_be(chunk, left),
-            class: decode_uint16_be(chunk, left + 2),
-            ttl: decode_uint32_be(chunk, left + 4),
+            qtype: decode_uint16(chunk, left),
+            class: decode_uint16(chunk, left + 2),
+            ttl: decode_uint32(chunk, left + 4),
         };
         left += 2+2+4;
 
-        let len = decode_uint16_be(chunk, left);
+        let len = decode_uint16(chunk, left);
         let unpack_rdata = unpack_type.get(ans.qtype);
         if (unpack_rdata) {
             unpack_rdata(ans, chunk.subarray(left + 2, left + 2 + len), len);
@@ -395,12 +395,12 @@ function unpack_response(chunk: Uint8Array, sz: number, response: (tid?: number,
 
     let left = 0;
     let [tid, flags, qdcount, ancount, nscount, arcount] = [
-        decode_uint16_be(chunk, left + 0),
-        decode_uint16_be(chunk, left + 2),
-        decode_uint16_be(chunk, left + 4),
-        decode_uint16_be(chunk, left + 6),
-        decode_uint16_be(chunk, left + 8),
-        decode_uint16_be(chunk, left + 10),
+        decode_uint16(chunk, left + 0),
+        decode_uint16(chunk, left + 2),
+        decode_uint16(chunk, left + 4),
+        decode_uint16(chunk, left + 6),
+        decode_uint16(chunk, left + 8),
+        decode_uint16(chunk, left + 10),
     ];
     left += 12;
     if ((flags & 0x8000) == 0) {
@@ -419,8 +419,8 @@ function unpack_response(chunk: Uint8Array, sz: number, response: (tid?: number,
     }
     let qname;
     [qname, left] = unpack_name(chunk, left);
-    let qtype = decode_uint16_be(chunk, left); left += 2;
-    let qclass = decode_uint16_be(chunk, left); left += 2;
+    let qtype = decode_uint16(chunk, left); left += 2;
+    let qclass = decode_uint16(chunk, left); left += 2;
     let answers = {
         tid,
         code,
@@ -587,7 +587,7 @@ async function tcp_query(server: DNS_SERVER, tid: number, qname: string, data: U
     let data_len = 0;
     data.forEach((d) => data_len += d.length);
     let header = new Uint8Array(2);
-    encode_uint16_be(header, 0, data_len);
+    encode_uint16(header, 0, data_len);
     socket.write(fd, [header, ...data]);
 
     let req: REQUEST = {
@@ -614,7 +614,7 @@ async function tcp_query(server: DNS_SERVER, tid: number, qname: string, data: U
         return [undefined, req.error || "closed"];
     }
 
-    let len = decode_uint16_be(header_chunk!, 0);
+    let len = decode_uint16(header_chunk!, 0);
     let [ok, chunk, sz] = await socket.read(fd, len);
     if (!ok) {
         tcp_release(tid, fd);
@@ -869,4 +869,3 @@ export async function resolve<K extends keyof RESOLVE_RESULT>(name: string, qtyp
     let r = (await dns_resolve(name, qtype, timeout)) as [RESOLVE_RESULT[K]?, string?];
     return r;
 }
-

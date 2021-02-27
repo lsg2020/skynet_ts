@@ -103,31 +103,29 @@ function _error_dispatch(error_session: number, error_source: SERVICE_ADDR) {
 }
 
 const SHARED_MIN_SZ = 128;
-const SHARED_MAX_SZ = 64 * 1024;
 let shared_bytes: Uint8Array;
-export function fetch_message(msg: bigint, sz: number, offset: number = 0, init: boolean = false, buffer?: Uint8Array): Uint8Array {
-    let dst = buffer || shared_bytes;
+export function fetch_message(msg: bigint, sz: number, offset?: number, new_buffer?: true): Uint8Array;
+export function fetch_message(msg: bigint, sz: number, offset?: number, buffer?: Uint8Array): Uint8Array;
+export function fetch_message(msg: bigint, sz: number, offset?: number, buffer?: Uint8Array|true): Uint8Array {
+    offset = offset || 0;
     let size = sz + offset;
+    if (!buffer || buffer === true) {
+        size = size < SHARED_MIN_SZ ? SHARED_MIN_SZ : size;
+    }
+    let dst = !buffer ? shared_bytes : (buffer === true ? new Uint8Array(size) : buffer);
 
     if (!dst || dst.length < size) {
-        let alloc_sz = SHARED_MIN_SZ;
-        if (shared_bytes) {
-            alloc_sz = shared_bytes.length * 2;
-        }
-        alloc_sz = Math.ceil(size / alloc_sz) * alloc_sz;
-        if (alloc_sz >= SHARED_MAX_SZ) {
-            alloc_sz = Math.ceil(size / SHARED_MAX_SZ) * SHARED_MAX_SZ;
-        } else if (alloc_sz < SHARED_MIN_SZ) {
-            alloc_sz = SHARED_MIN_SZ;
-        }
-        dst = new Uint8Array(alloc_sz);
+        let alloc_sz = dst ? size * 2 : size;
+        let new_dst = new Uint8Array(alloc_sz);
         if (buffer) {
-            dst.set(buffer);
-        } else if (!shared_bytes) {
-            shared_bytes = dst;
+            new_dst.set(buffer as Uint8Array);
         }
+        if (shared_bytes == dst) {
+            shared_bytes = new_dst;
+        }
+        dst = new_dst;
     }
-    if (!init && sz > 0)
+    if (msg != 0n && sz > 0)
         sz = Deno.skynet.fetch_message(msg, sz, dst.buffer, offset);
     return dst;
 }
@@ -431,7 +429,7 @@ register_protocol({
     id: PTYPE_ID.LUA,
     name: PTYPE_NAME.LUA,
     pack: (...obj: any[]): Uint8Array => {
-        let bytes = fetch_message(0n, SHARED_MIN_SZ, 0, true, shared_bytes);
+        let bytes = fetch_message(0n, SHARED_MIN_SZ, 0, shared_bytes);
         let sz;
         [shared_bytes, sz] = lua_seri.encode_ex(bytes, 0, ...obj);
         return shared_bytes.subarray(0, sz);

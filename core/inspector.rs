@@ -122,9 +122,11 @@ impl v8::inspector::V8InspectorClientImpl for Inspector {
         if self.resume_proxy_addr.is_none() {
             return;
         }
-        // let r = reqwest::blocking::get(self.resume_proxy_addr.as_ref().unwrap().as_str());
-        let client = reqwest::blocking::Client::builder().timeout(std::time::Duration::from_secs(5)).build().unwrap();
-        let r = client.get(self.resume_proxy_addr.as_ref().unwrap().as_str()).send();
+        let agent = ureq::AgentBuilder::new()
+            .timeout_read(std::time::Duration::from_secs(5))
+            .timeout_write(std::time::Duration::from_secs(5))
+            .build();
+        let r = agent.get(self.resume_proxy_addr.as_ref().unwrap().as_str()).call();
         if let Err(err) = r {
             println!("v8 inspector quit_message_loop_on_pause error:{}", err);
         }
