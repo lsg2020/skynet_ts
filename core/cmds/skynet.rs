@@ -6,6 +6,7 @@ use crate::ZeroCopyBuf;
 use crate::BufVec;
 use std::cell::RefCell;
 use std::rc::Rc;
+use byteorder::{ByteOrder, LittleEndian};
 use rusty_v8 as v8;
 
 pub fn init(rt: &mut JsRuntime) {
@@ -305,13 +306,93 @@ pub fn op_skynet_socket_shutdown(
 
 pub fn op_skynet_socket_unpack(
     _state: Rc<RefCell<OpState>>,
+    s: &mut JsRuntimeState,
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let msg = crate::get_args!(scope, v8::BigInt, args, 1).u64_value().0;
+    let sz = crate::get_args!(scope, v8::Integer, args, 2).value() as usize;
+
+    let socket_message = unsafe { &mut *(msg as *mut crate::skynet_socket_message) };
+
+    let errmsg_len = if socket_message.buffer == std::ptr::null() {
+        if sz <= crate::SKYNET_SOCKET_MESSAGE_SIZE {
+            0
+        } else {
+            sz - crate::SKYNET_SOCKET_MESSAGE_SIZE
+        }
+    } else {
+        0
+    };
+    let mut buffer_len = 4 + 4 + 4;
+    if socket_message.buffer == std::ptr::null() {
+        buffer_len += 2;
+        buffer_len += errmsg_len;
+    } else {
+        buffer_len += socket_message.ud as usize;
+    }
+
+    let mut udp_addrstring: *const libc::c_char = std::ptr::null();
+    let mut udp_addrsz: libc::c_int = 0;
+    if socket_message.msg_type == crate::SKYNET_SOCKET_TYPE_UDP {
+        udp_addrstring = unsafe { crate::skynet_socket_udp_address(msg as *mut crate::skynet_socket_message, &mut udp_addrsz) };
+        buffer_len += 2;
+        buffer_len += udp_addrsz as usize;
+    }
+
+    let new_bs = s.get_shared_bs(scope, buffer_len);
+    let buf = unsafe {
+        let bs = s.shared_bs.as_ref().unwrap();
+        crate::bindings::get_backing_store_slice_mut(bs, 0, bs.byte_length())
+    };
+    
+    let mut index = 0;
+    LittleEndian::write_i32(&mut buf[index .. index+4], socket_message.msg_type); index += 4;
+    LittleEndian::write_i32(&mut buf[index .. index+4], socket_message.id); index += 4;
+    LittleEndian::write_i32(&mut buf[index .. index+4], socket_message.ud); index += 4;
+
+    if socket_message.buffer == std::ptr::null() {
+        if sz <= crate::SKYNET_SOCKET_MESSAGE_SIZE {
+            LittleEndian::write_i16(&mut buf[index .. index+2], 0); index += 2;
+        } else {
+            LittleEndian::write_i16(&mut buf[index .. index+2], errmsg_len as i16); index += 2;
+            buf[index .. index+errmsg_len].copy_from_slice(unsafe {
+                std::slice::from_raw_parts((msg + crate::SKYNET_SOCKET_MESSAGE_SIZE as u64) as *const u8, (sz - crate::SKYNET_SOCKET_MESSAGE_SIZE) as usize)
+            });
+            index += errmsg_len;
+        }
+    } else {
+        buf[index .. index+socket_message.ud as usize].copy_from_slice(unsafe { std::slice::from_raw_parts(socket_message.buffer, socket_message.ud as usize) });
+        index += socket_message.ud as usize;
+
+        unsafe { libc::free(socket_message.buffer as *mut libc::c_void) };
+    }
+
+    if socket_message.msg_type == crate::SKYNET_SOCKET_TYPE_UDP {
+        if udp_addrstring == std::ptr::null() {
+            LittleEndian::write_i16(&mut buf[index .. index+2], 0);
+            // index += 2;
+        } else {
+            LittleEndian::write_i16(&mut buf[index .. index+2], udp_addrsz as i16); index += 2;
+            buf[index .. index+udp_addrsz as usize].copy_from_slice(unsafe { std::slice::from_raw_parts(udp_addrstring as *const u8, udp_addrsz as usize) });
+            // index += udp_addrsz as usize;
+        }
+    }
+    
+    let v8_ret = v8::Boolean::new(scope, new_bs).into();
+    rv.set(v8_ret);
+}
+
+pub fn _op_skynet_socket_unpack(
+    _state: Rc<RefCell<OpState>>,
     _s: &mut JsRuntimeState,
     scope: &mut v8::HandleScope,
     args: v8::FunctionCallbackArguments,
     mut rv: v8::ReturnValue,
 ) {
     let msg = crate::get_args!(scope, v8::BigInt, args, 1).u64_value().0;
-    let sz = crate::get_args!(scope, v8::Integer, args, 2).value() as u64;
+    let sz = crate::get_args!(scope, v8::Integer, args, 2).value() as usize;
 
     let socket_message = unsafe { &mut *(msg as *mut crate::skynet_socket_message) };
 
@@ -333,7 +414,7 @@ pub fn op_skynet_socket_unpack(
         if sz <= crate::SKYNET_SOCKET_MESSAGE_SIZE {
             data = v8::String::new(scope, "").unwrap().into();
         } else {
-            data = v8::String::new_from_utf8(scope, unsafe { std::slice::from_raw_parts((msg + crate::SKYNET_SOCKET_MESSAGE_SIZE) as *const u8, (sz - crate::SKYNET_SOCKET_MESSAGE_SIZE) as usize) }, v8::NewStringType::Normal).unwrap().into();
+            data = v8::String::new_from_utf8(scope, unsafe { std::slice::from_raw_parts((msg + crate::SKYNET_SOCKET_MESSAGE_SIZE as u64) as *const u8, (sz - crate::SKYNET_SOCKET_MESSAGE_SIZE) as usize) }, v8::NewStringType::Normal).unwrap().into();
         }
         v8_ret.set_index(scope, 3, data);
     } else {

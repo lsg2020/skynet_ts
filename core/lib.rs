@@ -1,3 +1,18 @@
+use std::alloc::{GlobalAlloc, Layout};
+pub struct SkynetMalloc;
+
+unsafe impl GlobalAlloc for SkynetMalloc {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        libc::malloc(layout.size() as libc::size_t) as *mut u8
+    }
+    unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
+        libc::free(ptr as *mut libc::c_void)
+    }
+}
+
+//#[global_allocator]
+//static GLOBAL: SkynetMalloc = SkynetMalloc;
+
 extern crate libc;
 #[macro_use]
 extern crate log;
@@ -48,7 +63,7 @@ pub struct skynet_socket_message {
     ud: c_int,
     buffer: *const u8,
 }
-pub const SKYNET_SOCKET_MESSAGE_SIZE: u64 = 24;
+pub const SKYNET_SOCKET_MESSAGE_SIZE: usize = 24;
 #[repr(C)]
 pub struct socket_sendbuffer {
     id: c_int,

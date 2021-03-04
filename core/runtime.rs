@@ -29,6 +29,7 @@ use std::sync::Once;
 use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
+use byteorder::{ByteOrder, LittleEndian};
 
 pub enum Snapshot {
     Static(&'static [u8]),
@@ -859,7 +860,7 @@ impl JsRuntime {
     ) -> Result<bool, AnyError> {
         {
             let state_rc = Self::state(self.v8_isolate());
-            let state = state_rc.borrow_mut();
+            let mut state = state_rc.borrow_mut();
 
             let scope = &mut v8::HandleScope::new(self.v8_isolate());
             let context = state
@@ -870,14 +871,36 @@ impl JsRuntime {
             let scope = &mut v8::ContextScope::new(scope, context);
 
             let tc_scope = &mut v8::TryCatch::new(scope);
-            let global = context.global(tc_scope).into();
+
+            let offset: usize = 64;
+            let new_bs = state.get_shared_bs(tc_scope, sz + offset);
+            let buf = unsafe {
+                let bs = state.shared_bs.as_ref().unwrap();
+                bindings::get_backing_store_slice_mut(bs, 0, bs.byte_length())
+            };
+
+            let mut index = 0;
+            LittleEndian::write_i32(&mut buf[index .. index+4], stype); index = index + 4;
+            LittleEndian::write_i32(&mut buf[index .. index+4], session); index = index + 4;
+            LittleEndian::write_i32(&mut buf[index .. index+4], source); index = index + 4;
+            LittleEndian::write_u32(&mut buf[index .. index+4], sz as u32); index = index + 4;
+            LittleEndian::write_u64(&mut buf[index .. index+8], msg as u64);
+            if sz > 0 {
+                buf[offset .. offset+sz].copy_from_slice(unsafe { std::slice::from_raw_parts(msg, sz) });
+            }
+
+            /*
             let v8_msg = v8::BigInt::new_from_u64(tc_scope, msg as u64).into();
             let v8_sz = v8::Integer::new(tc_scope, sz as i32).into();
 
             let v8_stype = v8::Integer::new(tc_scope, stype as i32).into();
             let v8_session = v8::Integer::new(tc_scope, session as i32).into();
             let v8_source = v8::Integer::new(tc_scope, source as i32).into();
+            */
 
+            let v8_new_bs = v8::Boolean::new(tc_scope, new_bs).into();
+
+            let global = context.global(tc_scope).into();
             let js_recv_cb = state
                 .js_recv_cb
                 .as_ref()
@@ -887,7 +910,8 @@ impl JsRuntime {
             js_recv_cb.call(
                 tc_scope,
                 global,
-                &[v8_stype, v8_session, v8_source, v8_msg, v8_sz],
+                //&[v8_stype, v8_session, v8_source, v8_msg, v8_sz],
+                &[v8_new_bs],
             );
         }
 
@@ -897,6 +921,8 @@ impl JsRuntime {
     }
 }
 
+const SHARED_MIN_SZ: usize = 128;
+const SHARED_MAX_SZ: usize = 64 * 1024;
 impl JsRuntimeState {
     pub fn create_inspector(&mut self, scope: &mut v8::HandleScope) {
         if self.inspector.is_none() {
@@ -943,5 +969,35 @@ impl JsRuntimeState {
         let inspector = &mut self.inspector.as_mut().unwrap();
         inspector.pause_proxy_addr.replace(pause_proxy_addr.to_owned());
         inspector.resume_proxy_addr.replace(resume_proxy_addr.to_owned());
+    }
+
+    pub fn get_shared_bs(&mut self, scope: &mut v8::HandleScope, sz: usize) -> bool {
+        let shared_bs = &self.shared_bs;
+        let mut new_bs = false;
+        let _bs = match shared_bs {
+            Some(bs) if bs.byte_length() >= sz => bs,
+            _ => {
+                let mut alloc_sz = SHARED_MIN_SZ;
+                if let Some(bs) = shared_bs {
+                    alloc_sz = if bs.byte_length() > 0 { bs.byte_length() * 2 } else { SHARED_MIN_SZ };
+                }
+                alloc_sz = (sz as f32 / alloc_sz as f32).ceil() as usize * alloc_sz;
+                if alloc_sz >= SHARED_MAX_SZ {
+                    alloc_sz = (sz as f32 / SHARED_MIN_SZ as f32).ceil() as usize * SHARED_MIN_SZ;
+                } else if alloc_sz < SHARED_MIN_SZ {
+                    alloc_sz = SHARED_MIN_SZ;
+                }
+
+                //let mut buf = Vec::new();
+                //buf.resize(alloc_sz, 0);
+                //let bs = v8::SharedArrayBuffer::new_backing_store_from_boxed_slice(buf.into_boxed_slice(),);
+                let bs = v8::SharedArrayBuffer::new_backing_store(scope, alloc_sz);
+                new_bs = true;
+
+                self.shared_bs = Some(bs.make_shared());
+                self.shared_bs.as_ref().unwrap()
+            }
+        };
+        new_bs
     }
 }

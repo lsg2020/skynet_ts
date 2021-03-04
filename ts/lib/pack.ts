@@ -39,22 +39,26 @@ export function decode_uint(chunk: Uint8Array, offset: number, n: number, is_le?
         return r;
     }
 }
-export function decode_bigint(chunk: Uint8Array, offset: number, n: number, is_le?: boolean): bigint {
+export function decode_biguint(chunk: Uint8Array, offset: number, n: number, is_le?: boolean): bigint {
     if (is_le) {
         let bitwidth = BigInt(n * 8);
         let r = 0n;
         while (n-- > 0) {
             r = (r * 256n) + BigInt(chunk[offset + n]);
         }
-        return uncomplement_bigint(r, bitwidth);    
+        return r;    
     } else {
         let bitwidth = BigInt(n * 8);
         let r = 0n;
         while (n-- > 0) {
             r = (r * 256n) + BigInt(chunk[offset++]);
         }
-        return uncomplement_bigint(r, bitwidth);
+        return r;
     }
+}
+export function decode_bigint(chunk: Uint8Array, offset: number, n: number, is_le?: boolean): bigint {
+    let bitwidth = BigInt(n * 8);
+    return uncomplement_bigint(decode_biguint(chunk, offset, n, is_le), bitwidth);
 }
 export function decode_float(chunk: Uint8Array, offset: number, is_le?: boolean) {
     return readIEEE754(chunk, offset, is_le ? true : false, 23, 4);
@@ -63,8 +67,8 @@ export function decode_double(chunk: Uint8Array, offset: number, is_le?: boolean
     return readIEEE754(chunk, offset, is_le ? true : false, 52, 8);
 }
 
-export function decode_str(chunk: Uint8Array, offset: number, n: number): [string, number] {
-    let len = decode_uint(chunk, offset, n);
+export function decode_str(chunk: Uint8Array, offset: number, n: number, is_le?: boolean): [string, number] {
+    let len = decode_uint(chunk, offset, n, is_le);
     let str = utf8.read(chunk, offset + n, offset + n + len);
     return [str, offset + n + len];
 }

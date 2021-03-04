@@ -1,6 +1,8 @@
+[profile.release]
+
 [package]
 name = "snjs_core"
-version = "0.6.0"
+version = "0.1.0"
 authors = ["lsg <270150038@qq.com>"]
 edition = "2018"
 
@@ -33,6 +35,7 @@ sys-info = "0.7.0"
 tungstenite = "0.11.1"
 ureq = "2.0.0"
 openssl-sys = "0.9.59"
+byteorder = "1.4.2"
 
 [dependencies]
 downcast-rs = "1.1.1"
@@ -57,3 +60,4 @@ tungstenite = "0.11.1"
 ureq = "2.0.0"
 openssl = { version = "0.10", features = ["vendored"] }
 openssl-sys = "0.9.59"
+byteorder = "1.4.2"

@@ -218,7 +218,7 @@ function _write_frame(ws: WS_OBJ, op: OP_CODE, payload_data?: Uint8Array, payloa
     let mask = masking_key && 0x80 || 0x00;
 
     let end_pos = SENDBUFFER_PRE_HEADER + payload_len;
-    ws.send_buffer = skynet.fetch_message(0n, end_pos, 0, ws.send_buffer || new Uint8Array(BUFFER_INIT_SIZE));
+    ws.send_buffer = skynet.alloc_buffer(end_pos, ws.send_buffer || new Uint8Array(BUFFER_INIT_SIZE));
     if (payload_data && payload_data != ws.send_buffer) {
         ws.send_buffer.set(payload_data, SENDBUFFER_PRE_HEADER);
     }

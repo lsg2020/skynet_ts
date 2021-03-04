@@ -198,8 +198,8 @@ class decoder {
     pos = 0;
     sz = 0;
     bytes?: Uint8Array;
-    constructor(buffer: Uint8Array, sz: number) {
-        this.pos = 0;
+    constructor(buffer: Uint8Array, sz: number, pos: number = 0) {
+        this.pos = pos;
         this.sz = sz;
         if (buffer && buffer.length) {
             this.bytes = buffer;
@@ -366,8 +366,13 @@ function decode(buffer: Uint8Array, sz: number) {
     return new decoder(buffer, sz).decode();
 }
 
+function decode_ex(buffer: Uint8Array, offset: number, sz: number) {
+    return new decoder(buffer, offset+sz, offset).decode();
+}
+
 export {
     encode,
     encode_ex,
     decode,
+    decode_ex,
 }

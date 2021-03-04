@@ -1,4 +1,5 @@
 import * as skynet from "skynet"
+import * as pack from "pack"
 let skynet_rt = Deno.skynet;
 
 export enum PROTOCOL_TYPE {
@@ -380,15 +381,17 @@ const SKYNET_SOCKET_TYPE_ACCEPT = 4;
 const SKYNET_SOCKET_TYPE_ERROR = 5;
 const SKYNET_SOCKET_TYPE_UDP = 6;
 const SKYNET_SOCKET_TYPE_WARNING = 7;
-socket_message[SKYNET_SOCKET_TYPE_DATA] = (id: SOCKET_ID, size: number, data: MSGPTR) => {
+socket_message[SKYNET_SOCKET_TYPE_DATA] = (id: SOCKET_ID, size: number, buffer: Uint8Array, offset: number) => {
     let s = socket_pool.get(id);
     if (!s) {
         skynet.error(`socket: drop package from ${id}`);
-        _pack_drop(data, size);
+        //_pack_drop(data, size);
         return;
     }
 
-    let sz = _pack_push(s.buffer!, data, size);
+    let msg = buffer.slice(offset, offset + size);
+
+    let sz = _pack_push(s.buffer!, msg);
     let rr = s.read_required;
     let rrt = typeof(rr);
     if (rrt == "number") {
@@ -412,12 +415,13 @@ socket_message[SKYNET_SOCKET_TYPE_DATA] = (id: SOCKET_ID, size: number, data: MS
         }
     }
 }
-socket_message[SKYNET_SOCKET_TYPE_CONNECT] = (id: SOCKET_ID, _ud: number, addr: string) => {
+socket_message[SKYNET_SOCKET_TYPE_CONNECT] = (id: SOCKET_ID, _ud: number, buffer: Uint8Array, offset: number) => {
     let s = socket_pool.get(id);
     if (!s) {
         return;
     }
 
+    let [addr] = pack.decode_str(buffer, offset, 2, true);
     // log remote addr
     s.connected = true;
     wakeup(s);
@@ -431,15 +435,17 @@ socket_message[SKYNET_SOCKET_TYPE_CLOSE] = (id: SOCKET_ID) => {
     s.connected = false;
     wakeup(s);
 }
-socket_message[SKYNET_SOCKET_TYPE_ACCEPT] = (id: SOCKET_ID, newid: SOCKET_ID, addr: string) => {
+socket_message[SKYNET_SOCKET_TYPE_ACCEPT] = (id: SOCKET_ID, newid: SOCKET_ID, buffer: Uint8Array, offset: number) => {
     let s = socket_pool.get(id);
     if (!s) {
         _close(newid);
         return;
     }
+    let [addr] = pack.decode_str(buffer, offset, 2, true);
     (s.callback! as SOCKET_ACCEPT_CB)(newid, addr);
 }
-socket_message[SKYNET_SOCKET_TYPE_ERROR] = (id: SOCKET_ID, _ud: number, err: string) => {
+socket_message[SKYNET_SOCKET_TYPE_ERROR] = (id: SOCKET_ID, _ud: number, buffer: Uint8Array, offset: number) => {
+    let [err] = pack.decode_str(buffer, offset, 2, true);
     let s = socket_pool.get(id);
     if (!s) {
         skynet.error(`socket: error on unknown ${id} ${err}`);
@@ -456,15 +462,16 @@ socket_message[SKYNET_SOCKET_TYPE_ERROR] = (id: SOCKET_ID, _ud: number, err: str
     _shutdown(id);
     wakeup(s)
 }
-socket_message[SKYNET_SOCKET_TYPE_UDP] = (id: SOCKET_ID, size: number, data: MSGPTR, address: string) => {
+socket_message[SKYNET_SOCKET_TYPE_UDP] = (id: SOCKET_ID, size: number, buffer: Uint8Array, offset: number) => {
     let s = socket_pool.get(id);
     if (!s || !s.callback) {
         skynet.error(`socket: drop udp package from ${id}`);
-        _pack_drop(data, size);
+        //_pack_drop(data, size);
         return;
     }
-    let msg = skynet.fetch_message(data, size);
-    _pack_drop(data, size);
+    let msg = buffer.slice(offset, offset + size);
+    let [address] = pack.decode_str(buffer, offset+size, 2, true);
+    //_pack_drop(data, size);
     (s.callback as SOCKET_UDP_RECV)(msg, size, address);
 }
 socket_message[SKYNET_SOCKET_TYPE_WARNING] = (id: SOCKET_ID, size: number) => {
@@ -478,9 +485,16 @@ socket_message[SKYNET_SOCKET_TYPE_WARNING] = (id: SOCKET_ID, size: number) => {
 skynet.register_protocol({
     id: skynet.PTYPE_ID.SOCKET,
     name: skynet.PTYPE_NAME.SOCKET,
-    unpack: skynet_rt.socket_unpack,
-    dispatch: (context: skynet.CONTEXT, type: number, id: number, ud: number, msg: string|MSGPTR, udp_address: string) => {
-        socket_message[type](id, ud, msg, udp_address);
+    unpack: (buf: Uint8Array, offset: number, sz: number) => {
+        return [skynet_rt.socket_unpack(skynet.get_cur_msgptr(), sz)];
+    },
+    dispatch: (context: skynet.CONTEXT, is_new_bs: boolean) => {
+        let buffer = skynet.get_shared_bs(is_new_bs);
+        let offset = 0;
+        let type = pack.decode_uint32(buffer, offset, true); offset += 4;
+        let id = pack.decode_uint32(buffer, offset, true); offset += 4;
+        let ud = pack.decode_uint32(buffer, offset, true); offset += 4;
+        socket_message[type](id, ud, buffer, offset);
     },
 })
 
@@ -501,7 +515,7 @@ async function suspend(s: SOCKET) {
 }
 
 const LARGE_PAGE_NODE=12;
-function _pack_push(sb: SOCKET_BUFFER, data: MSGPTR, sz: number) {
+function _pack_push(sb: SOCKET_BUFFER, data: Uint8Array) {
     let free_node = buffer_pool[0];
     if (!free_node) {
         let tsz = buffer_pool.length;
@@ -519,10 +533,10 @@ function _pack_push(sb: SOCKET_BUFFER, data: MSGPTR, sz: number) {
         buffer_pool[tsz] = pool;
     }
     buffer_pool[0] = free_node.next!;
-    free_node.buffer = new Uint8Array(sz);
-    free_node.sz = sz;
-    free_node.buffer = skynet.fetch_message(data, sz, 0, free_node.buffer);
-    skynet_rt.free(data);
+    free_node.buffer = data;
+    free_node.sz = data.length;
+    //free_node.buffer = skynet.fetch_message(data, sz, 0, free_node.buffer);
+    //skynet_rt.free(data);
     free_node.next = undefined;
     if (!sb.head) {
         skynet.assert(!sb.tail);
@@ -532,7 +546,7 @@ function _pack_push(sb: SOCKET_BUFFER, data: MSGPTR, sz: number) {
         sb.tail!.next = free_node;
         sb.tail = free_node;
     }
-    sb.size += sz;
+    sb.size += data.length;
     return sb.size;
 }
 function _node_free(sb: SOCKET_BUFFER) {
@@ -717,16 +731,16 @@ function _pool_new(sz: number) {
 function _pack_drop(data: MSGPTR, size: number) {
     skynet_rt.free(data);
 }
-function _pack_fetch_init(sz: number, buffer?: Uint8Array, buffer_offset?: number) {
+function _pack_fetch_init(sz: number, buffer?: Uint8Array, buffer_offset: number = 0) {
     if (buffer) {
-        return skynet.fetch_message(0n, sz, buffer_offset, buffer);
+        return skynet.alloc_buffer(sz + buffer_offset, buffer);
     } else {
-        return skynet.fetch_message(0n, sz, buffer_offset, true);
+        return skynet.alloc_buffer(sz + buffer_offset, true);
     }
 }
-function _pack_fetch(msg: Uint8Array, msg_offset: number, sz: number, buffer?: Uint8Array, buffer_offset?: number) {
+function _pack_fetch(msg: Uint8Array, msg_offset: number, sz: number, buffer?: Uint8Array, buffer_offset: number = 0) {
     //return skynet.fetch_message(msg, sz, buffer_offset, false, buffer);
-    buffer = skynet.fetch_message(0n, sz, buffer_offset, buffer);
+    buffer = skynet.alloc_buffer(sz + buffer_offset, buffer);
     if (sz < 64) {
         buffer_offset = buffer_offset || 0;
         for (let i=0; i<sz; i++) {
