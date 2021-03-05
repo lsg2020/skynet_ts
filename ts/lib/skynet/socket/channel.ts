@@ -8,6 +8,7 @@ export type CHANNEL_OPS = {
     auth?: (channel: Channel)=>void,
     nodelay?: boolean,
     overload?: boolean,
+    response?: (sock: Channel) => Promise<[number, boolean, any]>,
 }
 
 export type ADDRESS = string|ADDRESS_EX;
@@ -32,7 +33,7 @@ export class Channel {
     private _result_data = new Map<number, any>();
     private _overload_notify?: (flag: boolean) => void;
     private _auth?: (channel: Channel) => void;
-    private _response?: (fd: number) => [number, boolean, Uint8Array];
+    private _response?: (sock: Channel) => Promise<[number, boolean, any]>;
 
     constructor(ops: CHANNEL_OPS) {
         this._host = ops.host;
@@ -40,7 +41,7 @@ export class Channel {
         this._auth = ops.auth;
         this._backup = ops.backup;
         this._nodelay = ops.nodelay;
-
+        this._response = ops.response;
     }
 
     public async connect(once?: boolean) {
@@ -48,13 +49,13 @@ export class Channel {
         return await this.block_connect(once);
     }
 
-    public async request(request: Uint8Array, response?: REQUEST_FN, padding?: Array<Uint8Array>) {
+    public async request(request: Uint8Array|Uint8Array[], response?: REQUEST_FN|number, padding?: Array<Uint8Array>): Promise<any> {
         await this.block_connect(true);
         if (padding) {
             // padding may be a table, to support multi part request
             // multi part request use low priority socket write
             // now socket_lwrite returns as socket_write    
-            if (!socket.lwrite(this._socket, request)) {
+            if (!socket.lwrite(this._socket, request as Uint8Array)) {
                 this.sock_err();
             }
             padding.forEach((buff) => {
@@ -63,7 +64,7 @@ export class Channel {
                 }
             })
         } else {
-            if (!socket.write(this._socket, request)) {
+            if (!socket.write(this._socket, request as Uint8Array)) {
                 this.sock_err();
             }
         }
@@ -126,7 +127,7 @@ export class Channel {
         throw new Error(socket_error);
     }
 
-    private async wait_for_response(response: REQUEST_FN) {
+    private async wait_for_response(response: REQUEST_FN|number) {
         let token = skynet.gen_token();
         this.push_response(response, token);
         await skynet.wait(token);
@@ -171,8 +172,30 @@ export class Channel {
         }
     }
 
-    private dispatch_by_session() {
-        // TODO
+    private async dispatch_by_session() {
+        let response = this._response!;
+        while (this._socket) {
+            try {
+                let [session, result_ok, result_data] = await response(this);
+                let token = this._thread[session];
+                if (token) {
+                    delete this._thread[session];
+                    this._result.set(token, result_ok);
+                    this._result_data.set(token, result_data);
+                    skynet.wakeup(token);
+                } else {
+                    delete this._thread[session];
+                    skynet.error(`socket: unknown session ${session}`);
+                }
+            } catch (e) {
+                this.close_channel_socket();
+                let errmsg = "";
+                if (e.message != socket_error) {
+                    errmsg = e.message;
+                }
+                this.wakeup_all(errmsg);
+            }
+        }
     }
 
     private async pop_response(): Promise<[REQUEST_FN, number]> {

@@ -125,6 +125,8 @@ type Row = RowArray|RowMap;
 export class Mysql {
     public static async connect(ops: Options) {
         let mysql = new Mysql(ops);
+        // try connect first only once
+        await mysql.connect(true);
         return mysql;
     }
 
@@ -151,9 +153,10 @@ export class Mysql {
             overload: ops.overload,
             auth: this._mysql_login(ops.user || "", ops.password || "", CHARSET_MAP.get(ops.charset!) || 33, ops.database || "", ops.on_connect),
         });
+    }
 
-        // try connect first only once
-        this.channel.connect(true);
+    async connect(once?: boolean) {
+        await this.channel.connect(once);
     }
 
     disconnect() {
@@ -217,7 +220,7 @@ export class Mysql {
     async stmt_reset(stmt: any) {
         let packet = this._packet_alloc();
         packet.buffer(COM_STMT_RESET, 0);
-        packet.uint32_le(stmt.prepare_id);
+        packet.uint32(stmt.prepare_id, true);
         let query = this._compose_packet(packet);
         if (!this.query_resp) {
             this.query_resp = this._query_resp();
@@ -228,7 +231,7 @@ export class Mysql {
     async stmt_close(stmt: any) {
         let packet = this._packet_alloc();
         packet.buffer(COM_STMT_CLOSE, 0);
-        packet.uint32_le(stmt.prepare_id);
+        packet.uint32(stmt.prepare_id, true);
         let query = this._compose_packet(packet);
         return this.channel.request(query);
     }
@@ -243,7 +246,7 @@ export class Mysql {
     }
 
     private static _from_length_coded_bin(data: Uint8Array, pos: number): [number, number?] {
-        let first = pack.decode_uint8_le(data, pos);
+        let first = pack.decode_uint8(data, pos, true);
         if (first === undefined) {
             return [pos, undefined];
         }
@@ -255,35 +258,35 @@ export class Mysql {
             return [pos+1, undefined];
         }
         if (first == 252) {
-            return [pos+3, pack.decode_uint_le(data, pos+1, 2)];
+            return [pos+3, pack.decode_uint(data, pos+1, 2, true)];
         }
         if (first == 253) {
-            return [pos+4, pack.decode_uint_le(data, pos+1, 3)];
+            return [pos+4, pack.decode_uint(data, pos+1, 3, true)];
         }
         if (first == 254) {
-            return [pos+9, pack.decode_uint_le(data, pos+1, 8)];
+            return [pos+9, pack.decode_uint(data, pos+1, 8, true)];
         }
         return [pos+1, undefined];
     }
 
     private static _set_length_code_bin(data: pack.encoder, n: number) {
         if (n < 251) {
-            data.uint8_le(n);
+            data.uint8(n, true);
             return;
         }
 
         if (n < (1 << 16)) {
-            data.uint8_le(0xfc);
-            data.uint_le(n, 2);
+            data.uint8(0xfc, true);
+            data.uint(n, 2, true);
             return;
         }
         if (n < (1 << 24)) {
-            data.uint8_le(0xfd);
-            data.uint_le(n, 3);
+            data.uint8(0xfd, true);
+            data.uint(n, 3, true);
             return;
         }
-        data.uint8_le(0xfe);
-        data.uint_le(n, 8);
+        data.uint8(0xfe, true);
+        data.uint(n, 8, true);
         return;
     }
 
@@ -301,9 +304,9 @@ export class Mysql {
         return [end, pack.sub_str(data, start, end)];
     }
 
-    private _packet_alloc(use_shared: boolean = false) {
-        let packet = new pack.encoder(undefined, use_shared);
-        packet.padding(4);
+    private _packet_alloc() {
+        let packet = new pack.encoder();
+        packet.reserve(4);
         return packet;
     }
     private _compose_packet(packet: pack.encoder) {
@@ -314,8 +317,8 @@ export class Mysql {
         let buffer = packet.finish();
         let size = buffer.length - 4;
         let pos = 0;
-        pack.encode_uint_le(buffer, pos, size, 3); pos += 3;
-        pack.encode_uint8_le(buffer, pos, this.packet_no); pos += 1;
+        pack.encode_uint(buffer, pos, size, 3, true); pos += 3;
+        pack.encode_uint8(buffer, pos, this.packet_no, true); pos += 1;
         return buffer;
     }
 
@@ -324,18 +327,18 @@ export class Mysql {
         if (!ok) {
             throw new Error("failed to receive packet header");
         }
-        let len = pack.decode_uint_le(msg!, 0, 3);
+        let len = pack.decode_uint(msg!, 0, 3, true);
         if (len == 0) {
             throw new Error("empty packet");
         }
     
-        this.packet_no = pack.decode_uint8_le(msg!, 3);
+        this.packet_no = pack.decode_uint8(msg!, 3, true);
         [ok, msg, sz] = await sock.read(len);
         if (!ok) {
             throw new Error("failed to read packet content");
         }
     
-        let field_count = pack.decode_uint8_le(msg!, 0);
+        let field_count = pack.decode_uint8(msg!, 0, true);
         let type: FieldType;
         if (field_count == 0x00) {
             type = FieldType.OK;
@@ -355,14 +358,14 @@ export class Mysql {
             return new Uint8Array(0);
         }
     
-        let stage1 = crypt.sha1.array(password);
-        let stage2 = crypt.sha1.array(stage1);
+        let stage1 = crypt.sha1(password);
+        let stage2 = crypt.sha1(stage1);
 
         let temp = new Uint8Array(scramble1.length + scramble2.length + stage2.length);
         temp.set(scramble1, 0);
         temp.set(scramble2, scramble1.length);
         temp.set(stage2, scramble1.length + scramble2.length);
-        let stage3 = crypt.sha1.array(temp);
+        let stage3 = crypt.sha1(temp);
     
         let r = stage3;
         for (let i=0; i<r.length; i++) {
@@ -376,8 +379,8 @@ export class Mysql {
         let pos = 1;
         [pos, res.affected_rows] = Mysql._from_length_coded_bin(packet, pos);
         [pos, res.insert_id] = Mysql._from_length_coded_bin(packet, pos);
-        res.server_status = pack.decode_uint16_le(packet, pos); pos += 2;
-        res.warning_count = pack.decode_uint16_le(packet, pos); pos += 2;
+        res.server_status = pack.decode_uint16(packet, pos, true); pos += 2;
+        res.warning_count = pack.decode_uint16(packet, pos, true); pos += 2;
         let message = pack.sub_str(packet, pos);
         if (message && message != "") {
             res.message = message;
@@ -389,14 +392,14 @@ export class Mysql {
         let pos = 1;
         let warning_count: number;
         let status_flags: number;
-        warning_count = pack.decode_uint16_le(packet, pos); pos += 2;
-        status_flags = pack.decode_uint16_le(packet, pos); pos += 2;
+        warning_count = pack.decode_uint16(packet, pos, true); pos += 2;
+        status_flags = pack.decode_uint16(packet, pos, true); pos += 2;
         return [warning_count, status_flags];
     }
 
     private _parse_err_packet(packet: Uint8Array): [number, string, string?] {
         let pos = 1;
-        let errno = pack.decode_uint16_le(packet, pos); pos += 2;
+        let errno = pack.decode_uint16(packet, pos, true); pos += 2;
         let marker = pack.sub_str(packet, pos, pos+1);
         let sqlstate: string|undefined;
         if (marker == '#') {
@@ -440,11 +443,11 @@ export class Mysql {
         [pos, orig_name] = Mysql._from_length_coded_str(data, pos);
 
         pos += 1;
-        charsetnr = pack.decode_uint16_le(data, pos); pos+= 2;
-        length = pack.decode_uint32_le(data, pos); pos+= 4;
-        col_type = pack.decode_uint8_le(data, pos); pos+= 1;
+        charsetnr = pack.decode_uint16(data, pos, true); pos+= 2;
+        length = pack.decode_uint32(data, pos, true); pos+= 4;
+        col_type = pack.decode_uint8(data, pos, true); pos+= 1;
         pos += 1;
-        flags = pack.decode_uint16_le(data, pos); pos+= 2;
+        flags = pack.decode_uint16(data, pos, true); pos+= 2;
         if ((flags & 0x20) == 0) {
             col_is_signed = true;
         }
@@ -521,7 +524,7 @@ export class Mysql {
             let dispatch_resp = this._recv_decode_packet_resp();
             let packet = await sockchannel.response(dispatch_resp);
             let pos = 0;
-            this.protocol_ver = pack.decode_uint8_le(packet, pos); pos += 1;
+            this.protocol_ver = pack.decode_uint8(packet, pos, true); pos += 1;
             let server_ver = pack.sub_str(packet, pos, packet.indexOf(0, pos));
             if (!server_ver) {
                 throw new Error(`bad handshake initialization packet: bad server version`);
@@ -529,7 +532,7 @@ export class Mysql {
     
             this.server_ver = server_ver;
             pos += server_ver.length + 1;
-            let thread_id = pack.decode_uint32_le(packet, pos); pos += 4;
+            let thread_id = pack.decode_uint32(packet, pos, true); pos += 4;
             //let scramble1 = pack.sub_str(packet, pos, pos + 8);
             let scramble1 = packet.slice(pos, pos+8);
             if (scramble1.length != 8) {
@@ -537,11 +540,11 @@ export class Mysql {
             }
             pos += 9;
             
-            this.server_capabilities = pack.decode_uint16_le(packet, pos); pos += 2;
-            this.server_lang = pack.decode_uint8_le(packet, pos); pos += 1;
-            this.server_status = pack.decode_uint16_le(packet, pos); pos += 2;
+            this.server_capabilities = pack.decode_uint16(packet, pos, true); pos += 2;
+            this.server_lang = pack.decode_uint8(packet, pos, true); pos += 1;
+            this.server_status = pack.decode_uint16(packet, pos, true); pos += 2;
     
-            let more_capabilities = pack.decode_uint16_le(packet, pos); pos += 2;
+            let more_capabilities = pack.decode_uint16(packet, pos, true); pos += 2;
             this.server_capabilities = this.server_capabilities | more_capabilities << 16;
     
             let len = 21 - 8 - 1;
@@ -556,11 +559,11 @@ export class Mysql {
             //let scramble = scramble1 + scramble_part2;
             let token = this._compute_token(password, scramble1, scramble_part2);
             let client_flags = 260047;
-            let req = this._packet_alloc(true);
-            req.uint32_le(client_flags);
-            req.uint32_le(this.max_packet_size);
-            req.uint8_le(charset);
-            req.padding(23);
+            let req = this._packet_alloc();
+            req.uint32(client_flags, true);
+            req.uint32(this.max_packet_size, true);
+            req.uint8(charset, true);
+            req.reserve(23);
             req.cstring(user);
             req.buffer(token, 1);
             req.cstring(database);
@@ -702,11 +705,11 @@ export class Mysql {
 
         let pos = 1;
         let resp: any = {};
-        resp.prepare_id = pack.decode_uint32_le(packet, pos); pos += 4;
-        resp.field_count = pack.decode_uint16_le(packet, pos); pos += 2;
-        resp.param_count = pack.decode_uint16_le(packet, pos); pos += 2;
+        resp.prepare_id = pack.decode_uint32(packet, pos, true); pos += 4;
+        resp.field_count = pack.decode_uint16(packet, pos, true); pos += 2;
+        resp.param_count = pack.decode_uint16(packet, pos, true); pos += 2;
         pos += 1;
-        resp.warning_count = pack.decode_uint16_le(packet, pos); pos += 2;
+        resp.warning_count = pack.decode_uint16(packet, pos, true); pos += 2;
 
         resp.params = new Array<Col>();
         resp.fields = new Array<Col>();
@@ -743,40 +746,40 @@ export class Mysql {
     private static _store_types = new Map([
         ["number", [(data: pack.encoder, v: any) => {
             if (Number.isSafeInteger(v)) {
-                data.uint16_le(0x08);
+                data.uint16(0x08, true);
             } else {
-                data.uint16_le(0x05);
+                data.uint16(0x05, true);
             }
         }, (data: pack.encoder, v: any) => {
             if (Number.isSafeInteger(v)) {
-                data.uint64_le(v as number);
+                data.safe_uint64(v as number, true);
             } else {
-                data.double_le(v as number);
+                data.double(v as number, true);
             }
         }]],
         ["string", [(data: pack.encoder, v: any) => {
-            data.uint16_le(0x0f);
+            data.uint16(0x0f, true);
         }, (data: pack.encoder, v: any) => {
             let s = v as string;
             Mysql._set_length_code_bin(data, utf8.length(s));
             data.utf8_str(s, 0);
         }]],
         ["boolean", [(data: pack.encoder, v: any) => {
-            data.uint16_le(0x01);
+            data.uint16(0x01, true);
         }, (data: pack.encoder, v: any) => {
             if (v) {
-                data.uint8_le(1);
+                data.uint8(1, true);
             } else {
-                data.uint8_le(0);
+                data.uint8(0, true);
             }
         }]],
         ["undefined", [(data: pack.encoder, v: any) => {
-            data.uint16_le(0x06);
+            data.uint16(0x06, true);
         }, (data: pack.encoder, v: any) => {
         }]],
         ["object", [(data: pack.encoder, v: any) => {
             if (v instanceof Uint8Array) {
-                data.uint16_le(0x0f);
+                data.uint16(0x0f, true);
             } else {
                 skynet.assert(false);
             }
@@ -797,9 +800,9 @@ export class Mysql {
         this.packet_no = -1;
         let cmd_packet = this._packet_alloc();
         cmd_packet.buffer(COM_STMT_EXECUTE, 0);
-        cmd_packet.uint32_le(stmt.prepare_id);
-        cmd_packet.uint8_le(cursor_type);
-        cmd_packet.uint32_le(0x01);
+        cmd_packet.uint32(stmt.prepare_id, true);
+        cmd_packet.uint8(cursor_type, true);
+        cmd_packet.uint32(0x01, true);
         if (arg_num > 0) {
             let null_count = Math.floor((arg_num + 7) / 8);
             let field_index = 0;
@@ -813,10 +816,10 @@ export class Mysql {
                     }
                     field_index++;
                 }
-                cmd_packet.uint8_le(byte);
+                cmd_packet.uint8(byte, true);
             }
 
-            cmd_packet.uint8_le(0x01);
+            cmd_packet.uint8(0x01, true);
             for (let i=0; i<arg_num; i++) {
                 let v = args[i];
                 let f = Mysql._store_types.get(typeof(v));
@@ -842,18 +845,18 @@ export class Mysql {
         let value: string;
         [pos, len] = Mysql._from_length_coded_bin(data, pos);
         if (len == 7) {
-            let year = pack.decode_uint16_le(data, pos); pos += 2;
-            let month = pack.decode_uint8_le(data, pos); pos += 1;
-            let day = pack.decode_uint8_le(data, pos); pos += 1;
-            let hour = pack.decode_uint8_le(data, pos); pos += 1;
-            let minute = pack.decode_uint8_le(data, pos); pos += 1;
-            let second = pack.decode_uint8_le(data, pos); pos += 1;
+            let year = pack.decode_uint16(data, pos, true); pos += 2;
+            let month = pack.decode_uint8(data, pos, true); pos += 1;
+            let day = pack.decode_uint8(data, pos, true); pos += 1;
+            let hour = pack.decode_uint8(data, pos, true); pos += 1;
+            let minute = pack.decode_uint8(data, pos, true); pos += 1;
+            let second = pack.decode_uint8(data, pos, true); pos += 1;
             value = `${year}-${month}-${day} ${hour}:${minute}:${second}`;
         } else {
-            value = "2021-01-14 21:41:00";
+            value = "2012-05-12 00:00:00";
             // unsupported format
             pos += len!;
-        }        
+        }
         return [pos, value];
     }
     private static _get_buffer(data: Uint8Array, pos: number): [number, Uint8Array] {
@@ -863,28 +866,26 @@ export class Mysql {
     }
     private static _binary_parse = new Map([
         [0x01, (data: Uint8Array, pos: number): [number, any?] => {
-            return [pos+1, pack.decode_uint8_le(data, pos)];
+            return [pos+1, pack.decode_uint8(data, pos, true)];
         }],
         [0x02, (data: Uint8Array, pos: number): [number, any?] => {
-            return [pos+2, pack.decode_uint16_le(data, pos)];
+            return [pos+2, pack.decode_uint16(data, pos, true)];
         }],
         [0x03, (data: Uint8Array, pos: number): [number, any?] => {
-            return [pos+4, pack.decode_uint32_le(data, pos)];
+            return [pos+4, pack.decode_uint32(data, pos, true)];
         }],
         [0x04, (data: Uint8Array, pos: number): [number, any?] => {
-            let view = new DataView(data.buffer);
-            return [pos+4, view.getFloat32(pos, true)];
+            return [pos+4, pack.decode_float(data, pos, true)];
         }],
         [0x05, (data: Uint8Array, pos: number): [number, any?] => {
-            let view = new DataView(data.buffer);
-            return [pos+8, view.getFloat64(pos, true)];
+            return [pos+8, pack.decode_double(data, pos, true)];
         }],
         [0x07, Mysql._get_datetime],
         [0x08, (data: Uint8Array, pos: number): [number, any?] => {
-            return [pos+8, pack.decode_uint_le(data, pos, 8)];
+            return [pos+8, pack.decode_uint(data, pos, 8, true)];
         }],
         [0x09, (data: Uint8Array, pos: number): [number, any?] => {
-            return [pos+3, pack.decode_uint_le(data, pos, 3)];
+            return [pos+3, pack.decode_uint(data, pos, 3, true)];
         }],
         [0x0c, Mysql._get_datetime],
         [0x0f, Mysql._get_buffer],
@@ -904,7 +905,7 @@ export class Mysql {
         let null_fields: boolean[] = [];
         let field_index = 0;
         for (let i=1; i<pos; i++) {
-            let byte = pack.decode_uint8_le(data, i);
+            let byte = pack.decode_uint8(data, i, true);
             for (let j=0; j<8; j++) {
                 if (field_index > 2) {
                     null_fields[field_index-2] = ((byte & (1 << j)) != 0);
