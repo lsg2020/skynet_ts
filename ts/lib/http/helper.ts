@@ -99,7 +99,7 @@ export function tls_init_requestfunc(fd: number, ctx: bigint) {
     let write = writefunc(fd);
     return async () => {
         let bio_sz = tls_rt.handshake(ctx);
-        let ds1 = skynet.fetch_message(0n, bio_sz, 0, true);
+        let ds1 = skynet.alloc_buffer(bio_sz);
         let ds1_sz = tls_rt.bio_read(ctx, ds1.buffer, 0);
         write(ds1.subarray(0, ds1_sz));
 
@@ -109,7 +109,7 @@ export function tls_init_requestfunc(fd: number, ctx: bigint) {
             bio_sz = tls_rt.handshake(ctx);
 
             if (bio_sz) {
-                let ds3 = skynet.fetch_message(0n, bio_sz, 0, true);
+                let ds3 = skynet.alloc_buffer(bio_sz);
                 let ds3_sz = tls_rt.bio_read(ctx, ds3.buffer, 0);
                 write(ds3.subarray(0, ds3_sz));
             }
@@ -128,14 +128,14 @@ export function tls_init_responsefunc(fd: number, ctx: bigint) {
             bio_sz = tls_rt.handshake(ctx);
 
             if (bio_sz) {
-                let ds2 = skynet.fetch_message(0n, bio_sz, 0, true);
+                let ds2 = skynet.alloc_buffer(bio_sz);
                 let ds2_sz = tls_rt.bio_read(ctx, ds2.buffer, 0);
                 write(ds2.subarray(0, ds2_sz));
             }
         }
 
         bio_sz = tls_rt.ssl_write(ctx);
-        let ds3 = skynet.fetch_message(0n, bio_sz, 0, true);
+        let ds3 = skynet.alloc_buffer(bio_sz);
         let ds3_sz = tls_rt.bio_read(ctx, ds3.buffer, 0);
         write(ds3.subarray(0, ds3_sz));
     }
@@ -167,7 +167,7 @@ export function tls_writefunc(fd: number, ctx: bigint) {
         } else {
             bio_sz = tls_rt.ssl_write(ctx, ...content);
         }
-        let buffer = skynet.fetch_message(0n, bio_sz, 0, true);
+        let buffer = skynet.alloc_buffer(bio_sz);
         let sz = tls_rt.bio_read(ctx, buffer.buffer, 0);
         return write(buffer.subarray(0, sz));
     }
@@ -178,7 +178,7 @@ export function tls_readallfunc(fd: number, ctx: bigint) {
         [buffer, offset] = await socket.readall(fd, buffer, offset);
         let sz = tls_rt.bio_write(ctx, buffer.subarray(0, offset));
         while (sz) {
-            buffer = skynet.fetch_message(0n, sz, offset, true, buffer);
+            buffer = skynet.alloc_buffer(sz+offset, buffer);
             let read_sz;
             [read_sz, sz] = tls_rt.ssl_read(ctx, buffer.buffer, offset, sz);
             offset += read_sz;
@@ -192,7 +192,7 @@ export function tls_readfunc(fd: number, ctx: bigint) {
     return async (sz?: number, buffer?: Uint8Array, offset: number = 0): Promise<[Uint8Array, number]> => {
         let alloc_sz = sz ? sz : 128;
         let recv_sz = 0;
-        buffer = skynet.fetch_message(0n, alloc_sz, offset, true, buffer || new Uint8Array());
+        buffer = buffer ? skynet.alloc_buffer(alloc_sz + offset, buffer) : skynet.alloc_buffer(alloc_sz + offset, true);
 
         while (recv_sz < (sz ? sz : 1)) {
             let [read_sz, ssl_sz] = tls_rt.ssl_read(ctx, buffer.buffer, offset, alloc_sz);

@@ -1,6 +1,20 @@
 
- import {sha1} from "crypt/sha1";
- export {sha1};
+export {Md5} from "crypt/md5";
+import jsSHA from "jsSHA/sha";
+import {FixedLengthOptionsEncodingType} from "jsSHA/custom_types";
+
+export function hmac_sha1(data: Uint8Array|string, password: Uint8Array|string): Uint8Array {
+	let options: FixedLengthOptionsEncodingType = typeof(password) == "string" ? {hmacKey: {value: password, format: "TEXT"}} : {hmacKey: {value: password, format: "UINT8ARRAY"}};
+	let sha_obj = typeof(data) == "string" ? new jsSHA("SHA-1", "TEXT", options) : new jsSHA("SHA-1", "UINT8ARRAY", options);
+	sha_obj.update(data);
+	return sha_obj.getHash("UINT8ARRAY");
+}
+
+export function sha1(data: Uint8Array|string): Uint8Array {
+	let sha_obj = typeof(data) == "string" ? new jsSHA("SHA-1", "TEXT") : new jsSHA("SHA-1", "UINT8ARRAY");
+	sha_obj.update(data);
+	return sha_obj.getHash("UINT8ARRAY");
+}
 
 export function random(min: number, max: number): number {
     if (max < min) {
@@ -113,4 +127,3 @@ export function xor(buffer: Uint8Array, start: number, end: number, key: Uint8Ar
 		buffer[i+start] ^= key[i % key_length];
 	}
 }
-

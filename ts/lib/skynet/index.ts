@@ -1,3 +1,5 @@
+import * as pack from "pack";
+
 let skynet_rt = Deno.skynet;
 
 let proto = new Map<string|number, PROTOCOL_TYPE>();
@@ -30,7 +32,7 @@ type PROTOCOL_TYPE = {
     name: string,
     id: number,
     pack?: (...obj: any) => Uint8Array,
-    unpack?: (buf: bigint, sz: number) => any[],
+    unpack?: (buf: Uint8Array, offset: number, sz: number) => any[],
     dispatch?: Function,
 };
 export type CONTEXT = {
@@ -50,9 +52,9 @@ let unresponse = new Map<Function, SERVICE_ADDR>();   // call session -> [addr, 
 let sleep_session = new Map<number, number>();  // token -> session
 let next_dispatch_id = 1;
 
-type UNKNOWN_REQUEST_FUNC = (session: number, source: number, msg: bigint, sz: number, prototype: number) => void;
-let _unknow_request: UNKNOWN_REQUEST_FUNC = function (session: number, source: number, msg: bigint, sz: number, prototype: number) {
-    skynet_rt.error(`Unknown request (${prototype}): ${sz}`);
+type UNKNOWN_REQUEST_FUNC = (session: number, source: number, msg: Uint8Array, prototype: number) => void;
+let _unknow_request: UNKNOWN_REQUEST_FUNC = function (session: number, source: number, msg: Uint8Array, prototype: number) {
+    skynet_rt.error(`Unknown request (${prototype}): ${msg.length}`);
     throw new Error(`Unknown session : ${session} from ${source.toString(16)}`);
 }
 export function dispatch_unknown_request(unknown: UNKNOWN_REQUEST_FUNC) {
@@ -60,9 +62,9 @@ export function dispatch_unknown_request(unknown: UNKNOWN_REQUEST_FUNC) {
     _unknow_request = unknown;
     return prev;
 }
-type UNKNOWN_RESPONSE_FUNC = (session: number, source: number, msg: bigint, sz: number) => void;
-let _unknow_response: UNKNOWN_RESPONSE_FUNC = function (session: number, source: number, msg: bigint, sz: number) {
-    skynet_rt.error(`Response message : ${sz}`);
+type UNKNOWN_RESPONSE_FUNC = (session: number, source: number, msg: Uint8Array) => void;
+let _unknow_response: UNKNOWN_RESPONSE_FUNC = function (session: number, source: number, msg: Uint8Array) {
+    skynet_rt.error(`Response message : ${msg.length}`);
     throw new Error(`Unknown session : ${session} from ${source.toString(16)}`);
 }
 export function dispatch_unknown_response(unknown: UNKNOWN_RESPONSE_FUNC) {
@@ -103,32 +105,26 @@ function _error_dispatch(error_session: number, error_source: SERVICE_ADDR) {
 }
 
 const SHARED_MIN_SZ = 128;
-const SHARED_MAX_SZ = 64 * 1024;
 let shared_bytes: Uint8Array;
-export function fetch_message(msg: bigint, sz: number, offset: number = 0, init: boolean = false, buffer?: Uint8Array): Uint8Array {
-    let dst = buffer || shared_bytes;
-    let size = sz + offset;
+export function alloc_buffer(size: number, new_buffer?: true): Uint8Array;
+export function alloc_buffer(size: number, from?: Uint8Array): Uint8Array;
+export function alloc_buffer(size: number, from?: Uint8Array|true): Uint8Array {
+    if (!from || from === true) {
+        size = size < SHARED_MIN_SZ ? SHARED_MIN_SZ : size;
+    }
+    let dst = !from ? shared_bytes : (from === true ? new Uint8Array(size) : from);
 
     if (!dst || dst.length < size) {
-        let alloc_sz = SHARED_MIN_SZ;
-        if (shared_bytes) {
-            alloc_sz = shared_bytes.length * 2;
+        let alloc_sz = dst ? size * 2 : size;
+        let new_dst = new Uint8Array(alloc_sz);
+        if (from) {
+            new_dst.set(from as Uint8Array);
         }
-        alloc_sz = Math.ceil(size / alloc_sz) * alloc_sz;
-        if (alloc_sz >= SHARED_MAX_SZ) {
-            alloc_sz = Math.ceil(size / SHARED_MAX_SZ) * SHARED_MAX_SZ;
-        } else if (alloc_sz < SHARED_MIN_SZ) {
-            alloc_sz = SHARED_MIN_SZ;
+        if (shared_bytes == dst) {
+            shared_bytes = new_dst;
         }
-        dst = new Uint8Array(alloc_sz);
-        if (buffer) {
-            dst.set(buffer);
-        } else if (!shared_bytes) {
-            shared_bytes = dst;
-        }
+        dst = new_dst;
     }
-    if (!init && sz > 0)
-        sz = Deno.skynet.fetch_message(msg, sz, dst.buffer, offset);
     return dst;
 }
 
@@ -139,15 +135,35 @@ export function gen_token() {
     }
     return token;
 }
-async function dispatch_message(prototype: number, session: number, source: number, msg: bigint, sz: number) {
+
+let shared_bs: Uint8Array;
+export function get_shared_bs(is_new_bs: boolean) {
+    if (!shared_bs || is_new_bs) {
+        shared_bs = new Uint8Array(Deno.core.shared);
+    }
+    return shared_bs;
+}
+let cur_msgptr: bigint = 0n;
+export function get_cur_msgptr() {
+    return cur_msgptr;
+}
+async function dispatch_message(is_new_bs: boolean) {
+    let shared_buf = get_shared_bs(is_new_bs);
+    let prototype = pack.decode_uint32(shared_buf, 0, true);
+    let session = pack.decode_uint32(shared_buf, 4, true);
+    let source = pack.decode_uint32(shared_buf, 8, true);
+    let sz = pack.decode_uint32(shared_buf, 12, true);
+    cur_msgptr = pack.decode_biguint(shared_buf, 16, 8, true);
+    let offset = 64;
+
     if (prototype == PTYPE_ID.RESPONSE) {
         let response_func = session_id_callback.get(session);
         if (!response_func) {
-            return _unknow_response(session, source, msg, sz);
+            return _unknow_response(session, source, shared_buf.slice(offset, offset+sz));
         }
         session_id_callback.delete(session);
         if (!response_func[2])
-            response_func[0]([msg, sz]);
+            response_func[0]([shared_buf, offset, sz]);
     } else {
         let p = proto.get(prototype);
 
@@ -155,7 +171,7 @@ async function dispatch_message(prototype: number, session: number, source: numb
             if (session != 0) {
                 return skynet_rt.send(source, PTYPE_ID.ERROR, session);
             }
-            return _unknow_request(session, source, msg, sz, prototype);
+            return _unknow_request(session, source, shared_buf.slice(offset, offset+sz), prototype);
         }
         let context: CONTEXT = {
             proto: p,
@@ -164,7 +180,7 @@ async function dispatch_message(prototype: number, session: number, source: numb
             dispatch_id: gen_token(),
         }
         if (session) { watching_response.set(session, source); }
-        await p.dispatch!(context, ...p.unpack!(msg, sz));
+        await p.dispatch!(context, ...p.unpack!(shared_buf, offset, sz));
         if (session && watching_response.has(session)) {
             watching_response.delete(session);
             skynet_rt.error(`Maybe forgot response session:${session} proto:${p.name} source:${source}`);
@@ -283,14 +299,14 @@ export function genid(): number {
 
 // TODO skynet.redirect
 
-async function _yield_call(session: number, addr: SERVICE_ADDR): Promise<[bigint, number]> {
+async function _yield_call(session: number, addr: SERVICE_ADDR): Promise<[Uint8Array, number, number]> {
     let promise = new Promise((resolve, reject) => {
         session_id_callback.set(session, [resolve, reject]);
     })
 
     watching_request.set(session, addr);
     try {
-        let rsp = (await promise) as [bigint, number];
+        let rsp = (await promise) as [Uint8Array, number, number];
         return rsp;
     } catch {
         throw new Error("call failed");
@@ -304,9 +320,9 @@ export async function call(addr: SERVICE_ADDR, typename: string, ...params: any[
     let p = proto.get(typename);
     let pack = p!.pack!(...params);
     let session = skynet_rt.send(addr, p!.id, null, pack);
-    let [bytes, sz] = await _yield_call(session, addr);
+    let [buff, offset, sz] = await _yield_call(session, addr);
 
-    return p!.unpack!(bytes, sz);
+    return p!.unpack!(buff, offset, sz);
 }
 
 export function ret(context: CONTEXT, pack?: Uint8Array) {
@@ -413,9 +429,8 @@ export function assert<T>(cond: T, msg?: string): T {
     return cond;
 }
 
-export function string_unpack(msg: bigint, sz: number) {
-    let bytes = fetch_message(msg, sz);
-    return [new TextDecoder().decode(bytes.subarray(0, sz))];
+export function string_unpack(msg: Uint8Array, offset: number, sz: number) {
+    return [new TextDecoder().decode(msg.subarray(offset, offset+sz))];
 }
 
 export function string_pack(msg: string) {
@@ -431,13 +446,13 @@ register_protocol({
     id: PTYPE_ID.LUA,
     name: PTYPE_NAME.LUA,
     pack: (...obj: any[]): Uint8Array => {
-        let bytes = fetch_message(0n, SHARED_MIN_SZ, 0, true, shared_bytes);
+        let bytes = alloc_buffer(SHARED_MIN_SZ, shared_bytes);
         let sz;
         [shared_bytes, sz] = lua_seri.encode_ex(bytes, 0, ...obj);
         return shared_bytes.subarray(0, sz);
     },
-    unpack: (msg: bigint, sz: number) => {
-        return lua_seri.decode(fetch_message(msg, sz), sz); 
+    unpack: (msg: Uint8Array, offset: number, sz: number) => {
+        return lua_seri.decode_ex(msg, offset, sz);
     },
     dispatch: undefined,
 })

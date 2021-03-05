@@ -1,3 +1,18 @@
+use std::alloc::{GlobalAlloc, Layout};
+pub struct SkynetMalloc;
+
+unsafe impl GlobalAlloc for SkynetMalloc {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        libc::malloc(layout.size() as libc::size_t) as *mut u8
+    }
+    unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
+        libc::free(ptr as *mut libc::c_void)
+    }
+}
+
+//#[global_allocator]
+//static GLOBAL: SkynetMalloc = SkynetMalloc;
+
 extern crate libc;
 #[macro_use]
 extern crate log;
@@ -48,7 +63,7 @@ pub struct skynet_socket_message {
     ud: c_int,
     buffer: *const u8,
 }
-pub const SKYNET_SOCKET_MESSAGE_SIZE: u64 = 24;
+pub const SKYNET_SOCKET_MESSAGE_SIZE: usize = 24;
 #[repr(C)]
 pub struct socket_sendbuffer {
     id: c_int,
@@ -168,9 +183,9 @@ pub extern "C" fn dispatch_cb(
 ) -> c_int {
     let ctx = unsafe { &mut *ctx };
 
-    let custom_archive = ctx.isolate.custom_archive;
-    let _locker = v8::Locker::new(ctx.isolate.v8_isolate(), custom_archive);
+    let custom_archive = if ctx.isolate.inspector_session_len > 0 { ctx.isolate.custom_archive } else { ctx.isolate.empty_archive };
     let _isolate_scope = v8::IsolateScope::new(ctx.isolate.v8_isolate());
+    let _locker = v8::Locker::new(ctx.isolate.v8_isolate(), custom_archive);
     let _auto_check = runtime::IsolateAutoCheck::new(ctx.isolate.v8_isolate());
 
     let r = ctx
@@ -202,8 +217,8 @@ pub extern "C" fn init_cb(
         .unwrap();
     let loader_path = get_env(ctx.skynet, "js_loader", "./js/loader.js");
     let custom_archive = ctx.isolate.custom_archive;
-    let _locker = v8::Locker::new(ctx.isolate.v8_isolate(), custom_archive);
     let _isolate_scope = v8::IsolateScope::new(ctx.isolate.v8_isolate());
+    let _locker = v8::Locker::new(ctx.isolate.v8_isolate(), custom_archive);
     let _auto_check = runtime::IsolateAutoCheck::new(ctx.isolate.v8_isolate());
 
     {

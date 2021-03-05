@@ -1,6 +1,8 @@
+[profile.release]
+
 [package]
 name = "snjs_core"
-version = "0.6.0"
+version = "0.1.0"
 authors = ["lsg <270150038@qq.com>"]
 edition = "2018"
 
@@ -17,7 +19,7 @@ futures = "0.3.5"
 lazy_static = "1.4.0"
 libc = "0.2.71"
 log = "0.4.8"
-rusty_v8 = {version = "0.13.0", path = "../rusty_v8"}
+rusty_v8 = {version = "0.19.0", path = "../rusty_v8"}
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0.55", features = [ "preserve_order" ] }
 smallvec = "1.4.0"
@@ -31,8 +33,9 @@ rand = "0.7.3"
 sourcemap = "6.0.1"
 sys-info = "0.7.0"
 tungstenite = "0.11.1"
-reqwest = { version = "0.10", features = ["blocking", "json"] }
+ureq = "2.0.0"
 openssl-sys = "0.9.59"
+byteorder = "1.4.2"
 
 [dependencies]
 downcast-rs = "1.1.1"
@@ -40,7 +43,7 @@ futures = "0.3.5"
 lazy_static = "1.4.0"
 libc = "0.2.71"
 log = "0.4.8"
-rusty_v8 = {version = "0.13.0", path = "../rusty_v8"}
+rusty_v8 = {version = "0.19.0", path = "../rusty_v8"}
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0.55", features = [ "preserve_order" ] }
 smallvec = "1.4.0"
@@ -54,6 +57,7 @@ rand = "0.7.3"
 sourcemap = "6.0.1"
 sys-info = "0.7.0"
 tungstenite = "0.11.1"
-reqwest = { version = "0.10", features = ["blocking", "json"] }
+ureq = "2.0.0"
 openssl = { version = "0.10", features = ["vendored"] }
 openssl-sys = "0.9.59"
+byteorder = "1.4.2"

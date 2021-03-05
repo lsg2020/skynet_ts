@@ -12,7 +12,7 @@ use v8::inspector::*;
 pub const CONTEXT_GROUP_ID: i32 = 1;
 pub struct Inspector {
     base: v8::inspector::V8InspectorClientBase,
-    v8_inspector: v8::UniqueRef<v8::inspector::V8Inspector>,
+    v8_inspector: v8::UniquePtr<v8::inspector::V8Inspector>,
     pub sessions: HashMap<i64, Box<dyn v8::inspector::ChannelImpl>>,
     pub v8_sessions: HashMap<i64, *mut v8::inspector::V8InspectorSession>,
     pub next_session_id: i64,
@@ -24,13 +24,13 @@ pub struct Inspector {
 impl Deref for Inspector {
     type Target = v8::inspector::V8Inspector;
     fn deref(&self) -> &Self::Target {
-        &self.v8_inspector
+        self.v8_inspector.as_ref().unwrap()
     }
 }
 
 impl DerefMut for Inspector {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.v8_inspector
+        self.v8_inspector.as_mut().unwrap()
     }
 }
 
@@ -39,18 +39,12 @@ impl Inspector {
         let context = v8::Local::new(scope, context);
         let scope = &mut v8::ContextScope::new(scope, context);
 
-        let self_ = new_box_with(|self_ptr| {
+        let mut self_ = new_box_with(|self_ptr| {
             let v8_inspector_client = v8::inspector::V8InspectorClientBase::new::<Self>();
-            let mut v8_inspector =
-                v8::inspector::V8Inspector::create(scope, unsafe { &mut *self_ptr });
-
-            let name = b"global_context";
-            let name_view = StringView::from(&name[..]);
-            v8_inspector.context_created(context, CONTEXT_GROUP_ID, name_view);
 
             Self {
                 base: v8_inspector_client,
-                v8_inspector,
+                v8_inspector: Default::default(),
                 sessions: HashMap::new(),
                 v8_sessions: HashMap::new(),
                 next_session_id: 1,
@@ -59,6 +53,11 @@ impl Inspector {
                 resume_proxy_addr: None,
             }
         });
+        self_.v8_inspector = v8::inspector::V8Inspector::create(scope, &mut *self_).into();
+        // Tell the inspector about the global context.
+        let context = v8::Local::new(scope, context);
+        let context_name = v8::inspector::StringView::from(&b"global context"[..]);
+        self_.context_created(context, CONTEXT_GROUP_ID, context_name);
 
         self_
     }
@@ -123,9 +122,11 @@ impl v8::inspector::V8InspectorClientImpl for Inspector {
         if self.resume_proxy_addr.is_none() {
             return;
         }
-        // let r = reqwest::blocking::get(self.resume_proxy_addr.as_ref().unwrap().as_str());
-        let client = reqwest::blocking::Client::builder().timeout(std::time::Duration::from_secs(5)).build().unwrap();
-        let r = client.get(self.resume_proxy_addr.as_ref().unwrap().as_str()).send();
+        let agent = ureq::AgentBuilder::new()
+            .timeout_read(std::time::Duration::from_secs(5))
+            .timeout_write(std::time::Duration::from_secs(5))
+            .build();
+        let r = agent.get(self.resume_proxy_addr.as_ref().unwrap().as_str()).call();
         if let Err(err) = r {
             println!("v8 inspector quit_message_loop_on_pause error:{}", err);
         }

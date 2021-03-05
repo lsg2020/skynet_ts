@@ -1,4 +1,5 @@
 import { utf8 } from "utf8"
+import * as pack from "pack"
 
 const TYPE_NIL = 0
 const TYPE_BOOLEAN = 1
@@ -24,13 +25,11 @@ const INITIAL_BUFFER_SIZE = 2048;
 
 class encoder {
     public pos: number;
-    public view: DataView;
     public bytes: Uint8Array;
 
     constructor(bytes?: Uint8Array, offset?: number) {
         this.bytes = bytes || new Uint8Array(INITIAL_BUFFER_SIZE);
         this.pos = offset || 0;
-        this.view = new DataView(this.bytes.buffer);
     }
 
     serialize() {
@@ -42,7 +41,6 @@ class encoder {
             let new_bytes = new Uint8Array((this.pos + sz)*2);
             new_bytes.set(this.bytes);
             this.bytes = new_bytes;
-            this.view = new DataView(this.bytes.buffer);
         }
     }
 
@@ -60,6 +58,8 @@ class encoder {
             this.encode_string(object);
         } else if (type == "number") {
             this.encode_number(object);
+        } else if (type == "bigint") {
+            this.encode_bigint(object);
         } else if (type == "object") {
             this.encode_object(object, depth+1);
         } else {
@@ -73,13 +73,17 @@ class encoder {
     encode_boolean(v: boolean) {
         this.write_u8(this.combin_type(TYPE_BOOLEAN, v ? 1 : 0));
     }
+    encode_bigint(v: bigint) {
+        this.write_u8(this.combin_type(TYPE_NUMBER, TYPE_NUMBER_QWORD));
+        this.write_bigint(v);
+    }
     encode_number(v: number) {
         if (Number.isSafeInteger(v)) {
             if (v == 0) {
                 this.write_u8(this.combin_type(TYPE_NUMBER, TYPE_NUMBER_ZERO));
             } else if (v < -2147483648 || v > 2147483648) {
                 this.write_u8(this.combin_type(TYPE_NUMBER, TYPE_NUMBER_QWORD));
-                this.write_f64(v);
+                this.write_i64(v);
             } else if (v < 0) {
                 this.write_u8(this.combin_type(TYPE_NUMBER, TYPE_NUMBER_DWORD));
                 this.write_i32(v);
@@ -91,7 +95,7 @@ class encoder {
                 this.write_u16(v);
             } else {
                 this.write_u8(this.combin_type(TYPE_NUMBER, TYPE_NUMBER_DWORD));
-                this.write_i32(v);
+                this.write_u32(v);
             }    
         } else {
             this.write_u8(this.combin_type(TYPE_NUMBER, TYPE_NUMBER_REAL));
@@ -144,32 +148,42 @@ class encoder {
     write_u8(v: number) {
         this.ensure_write_size(1);
         
-        this.view.setUint8(this.pos, v);
+        pack.encode_uint8(this.bytes, this.pos, v, true);
         this.pos++;
     }
     write_i16(v: number) {
         this.ensure_write_size(2);
-        this.view.setInt16(this.pos, v, true);
+        pack.encode_int16(this.bytes, this.pos, v, true);
         this.pos += 2;
     }
     write_u16(v: number) {
         this.ensure_write_size(2);
-        this.view.setUint16(this.pos, v, true);
+        pack.encode_uint16(this.bytes, this.pos, v, true);
         this.pos += 2;
     }
     write_i32(v: number) {
         this.ensure_write_size(4);
-        this.view.setInt32(this.pos, v, true);
+        pack.encode_int32(this.bytes, this.pos, v, true);
         this.pos += 4;
     }
     write_u32(v: number) {
         this.ensure_write_size(4);
-        this.view.setUint32(this.pos, v, true);
+        pack.encode_uint32(this.bytes, this.pos, v, true);
         this.pos += 4;
+    }
+    write_i64(v: number) {
+        this.ensure_write_size(8);
+        pack.encode_safe_int64(this.bytes, this.pos, v, true);
+        this.pos += 8;
+    }
+    write_bigint(v: bigint) {
+        this.ensure_write_size(8);
+        pack.encode_bigint(this.bytes, this.pos, v, 8, true);
+        this.pos += 8;
     }
     write_f64(v: number) {
         this.ensure_write_size(8);
-        this.view.setFloat64(this.pos, v, true);
+        pack.encode_double(this.bytes, this.pos, v, true);
         this.pos += 8;
     }
     write_string(v: string) {
@@ -183,13 +197,11 @@ class encoder {
 class decoder {
     pos = 0;
     sz = 0;
-    view?: DataView;
     bytes?: Uint8Array;
-    constructor(buffer: Uint8Array, sz: number) {
-        this.pos = 0;
+    constructor(buffer: Uint8Array, sz: number, pos: number = 0) {
+        this.pos = pos;
         this.sz = sz;
         if (buffer && buffer.length) {
-            this.view = new DataView(buffer.buffer);
             this.bytes = buffer;
         }
     }
@@ -215,7 +227,7 @@ class decoder {
         if (type == TYPE_NIL) {
             return null;
         } else if (type == TYPE_BOOLEAN) {
-            return subtype ? true : false;            
+            return subtype ? true : false;
         } else if (type == TYPE_NUMBER) {
             return this.decode_number(subtype);
         } else if (type == TYPE_SHORT_STRING) {
@@ -277,7 +289,7 @@ class decoder {
         } else if (subtype == TYPE_NUMBER_DWORD) {
             return this.read_i32();
         } else if (subtype == TYPE_NUMBER_QWORD) {
-            return this.read_f64();
+            return this.read_i64();
         } else if (subtype == TYPE_NUMBER_REAL) {
             return this.read_f64();
         }
@@ -290,33 +302,39 @@ class decoder {
     }
     look_u8() {
         this.ensure_read_size(1);
-        return this.view!.getUint8(this.pos);
+        return pack.decode_uint8(this.bytes!, this.pos, true);
     }
     read_u8() {
         this.ensure_read_size(1);
-        return this.view!.getUint8(this.pos++);
+        return pack.decode_uint8(this.bytes!, this.pos++, true);
     }
     read_u16() {
         this.ensure_read_size(2);
-        let v = this.view!.getUint16(this.pos, true);
+        let v = pack.decode_uint16(this.bytes!, this.pos, true);
         this.pos += 2;
         return v;
     }
     read_i32() {
         this.ensure_read_size(4);
-        let v = this.view!.getInt32(this.pos, true);
+        let v = pack.decode_int32(this.bytes!, this.pos, true);
         this.pos += 4;
         return v;
     }
     read_u32() {
         this.ensure_read_size(4);
-        let v = this.view!.getUint32(this.pos, true);
+        let v = pack.decode_uint32(this.bytes!, this.pos, true);
         this.pos += 4;
+        return v;
+    }
+    read_i64() {
+        this.ensure_read_size(8);
+        let v = pack.decode_bigint(this.bytes!, this.pos, 8, true);
+        this.pos += 8;
         return v;
     }
     read_f64() {
         this.ensure_read_size(8);
-        let v = this.view!.getFloat64(this.pos, true);
+        let v = pack.decode_double(this.bytes!, this.pos, true);
         this.pos += 8;
         return v;
     }
@@ -348,8 +366,13 @@ function decode(buffer: Uint8Array, sz: number) {
     return new decoder(buffer, sz).decode();
 }
 
+function decode_ex(buffer: Uint8Array, offset: number, sz: number) {
+    return new decoder(buffer, offset+sz, offset).decode();
+}
+
 export {
     encode,
     encode_ex,
     decode,
+    decode_ex,
 }
