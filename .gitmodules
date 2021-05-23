@@ -1,0 +1,6 @@
+[submodule "rusty_v8"]
+	path = rusty_v8
+	url = https://github.com/lsg2020/rusty_v8
+[submodule "deno"]
+	path = deno
+	url = https://github.com/lsg2020/deno
