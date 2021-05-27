@@ -35,5 +35,8 @@ let base_service_path = main_pattern.match(/(.*\/)/)[0];
 var SERVICE_PATH = base_service_path.replace("?", SERVICE_NAME);
 skynet.set_jslib_paths(`${SERVICE_PATH}/?.js;${SERVICE_PATH}/?/index.js;` + js_lib_paths);
 
+if (main_service_path[0] != "/") {
+    main_service_path = "file:///" + main_service_path;
+}
 await import(main_service_path);
 export {};

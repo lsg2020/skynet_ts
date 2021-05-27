@@ -243,7 +243,10 @@ fn merge_bufs(zero_copy: &[ZeroCopyBuf]) -> (*const libc::c_void, libc::size_t) 
         sz += (buf as &[u8]).len();
     }
 
-    let dest = unsafe { libc::malloc(sz) };
+    let dest = unsafe { 
+        // libc::malloc(sz) 
+        interface::skynet_malloc(sz as u32) as *mut libc::c_void
+    };
     sz = 0;
     for buf in zero_copy {
         let buf_sz = (buf as &[u8]).len();
@@ -692,7 +695,10 @@ pub fn op_skynet_socket_alloc_msg(
         }
     };
 
-    let dest = unsafe { libc::malloc(sz) };
+    let dest = unsafe { 
+        //libc::malloc(sz) 
+        interface::skynet_malloc(sz as u32) as *mut libc::c_void
+    };
     sz = 0;
     for buf in &mut bufs {
         let buf_sz = (buf as &[u8]).len();

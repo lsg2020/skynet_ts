@@ -18,7 +18,10 @@ pub struct socket_sendbuffer {
     pub sz: size_t,
 }
 
+#[link(name="skynet")]
 extern "C" {
+    pub fn skynet_malloc(size: c_uint) -> *mut c_void;
+    //pub fn skynet_free(ptr: *const c_void);
     pub fn skynet_send(
         skynet: *const c_void,
         source: c_uint,

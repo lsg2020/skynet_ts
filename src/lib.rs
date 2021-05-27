@@ -395,7 +395,8 @@ pub extern "C" fn snjs_init(ptr: *mut snjs, skynet: *const c_void, args: *const 
 
     let (init_msg, init_sz) = unsafe {
         let sz = libc::strlen(args) + 1;
-        let msg = libc::malloc(sz);
+        //let msg = libc::malloc(sz);
+        let msg = interface::skynet_malloc(sz as u32);
         libc::memcpy(msg, args as *const c_void, sz);
         (msg, sz)
     };
@@ -440,6 +441,7 @@ pub extern "C" fn snjs_init(ptr: *mut snjs, skynet: *const c_void, args: *const 
             init_sz,
         );
     };
+    #[cfg(target_os = "linux")]
     unsafe {
         interface::skynet_thread_notify_callback(
             ctx.skynet,
