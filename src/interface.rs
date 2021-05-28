@@ -18,10 +18,10 @@ pub struct socket_sendbuffer {
     pub sz: size_t,
 }
 
-#[link(name="skynet")]
+#[cfg_attr(target_os = "windows", link(name = "skynet"))]
 extern "C" {
     pub fn skynet_malloc(size: c_uint) -> *mut c_void;
-    //pub fn skynet_free(ptr: *const c_void);
+    pub fn skynet_free(ptr: *const c_void);
     pub fn skynet_send(
         skynet: *const c_void,
         source: c_uint,
@@ -41,7 +41,11 @@ extern "C" {
         size: usize,
     ) -> c_int;
     pub fn skynet_callback(skynet: *const c_void, ctx: *const c_void, cb: *const c_void);
-    pub fn skynet_thread_notify_callback(skynet: *const c_void, ctx: *const c_void, cb: *const c_void);
+    pub fn skynet_thread_notify_callback(
+        skynet: *const c_void,
+        ctx: *const c_void,
+        cb: *const c_void,
+    );
     pub fn skynet_command(
         skynet: *const c_void,
         cmd: *const c_char,

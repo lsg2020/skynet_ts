@@ -55,7 +55,10 @@ pub fn init() -> Extension {
                 "op_skynet_socket_nodelay",
                 op_sync(op_skynet_socket_nodelay),
             ),
-            ("op_skynet_set_jslib_paths", op_sync(op_skynet_set_jslib_paths)),
+            (
+                "op_skynet_set_jslib_paths",
+                op_sync(op_skynet_set_jslib_paths),
+            ),
         ])
         .ops_ex(vec![
             ("op_skynet_fetch_message", Box::new(op_skynet_fetch_message)),
@@ -243,8 +246,8 @@ fn merge_bufs(zero_copy: &[ZeroCopyBuf]) -> (*const libc::c_void, libc::size_t) 
         sz += (buf as &[u8]).len();
     }
 
-    let dest = unsafe { 
-        // libc::malloc(sz) 
+    let dest = unsafe {
+        // libc::malloc(sz)
         interface::skynet_malloc(sz as u32) as *mut libc::c_void
     };
     sz = 0;
@@ -353,7 +356,10 @@ pub fn op_skynet_free(
     _rv: &mut v8::ReturnValue,
 ) {
     let msg = get_args!(scope, v8::BigInt, args, 1).u64_value().0;
-    unsafe { libc::free(msg as *mut libc::c_void) };
+    unsafe {
+        //libc::free(msg as *mut libc::c_void)
+        interface::skynet_free(msg as *mut libc::c_void)
+    };
 }
 
 #[allow(clippy::mut_from_ref)]
@@ -557,7 +563,10 @@ pub fn op_skynet_socket_unpack(
         });
         index += socket_message.ud as usize;
 
-        unsafe { libc::free(socket_message.buffer as *mut libc::c_void) };
+        unsafe {
+            // libc::free(socket_message.buffer as *mut libc::c_void)
+            interface::skynet_free(socket_message.buffer as *mut libc::c_void)
+        };
     }
 
     if socket_message.msg_type == interface::SKYNET_SOCKET_TYPE_UDP {
@@ -695,8 +704,8 @@ pub fn op_skynet_socket_alloc_msg(
         }
     };
 
-    let dest = unsafe { 
-        //libc::malloc(sz) 
+    let dest = unsafe {
+        //libc::malloc(sz)
         interface::skynet_malloc(sz as u32) as *mut libc::c_void
     };
     sz = 0;

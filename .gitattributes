@@ -1,0 +1,5 @@
+* text=auto
+*.rs text eol=crlf
+*.ts text eol=crlf
+*.js text eol=crlf
+

@@ -441,7 +441,6 @@ pub extern "C" fn snjs_init(ptr: *mut snjs, skynet: *const c_void, args: *const 
             init_sz,
         );
     };
-    #[cfg(target_os = "linux")]
     unsafe {
         interface::skynet_thread_notify_callback(
             ctx.skynet,
