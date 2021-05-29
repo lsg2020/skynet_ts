@@ -307,7 +307,7 @@ pub extern "C" fn init_cb(
             "noColor": false,
             "pid": std::process::id(),
             "ppid": deno_runtime::ops::runtime::ppid(),
-            "target": "",
+            "target": deno_runtime::js::TARGET,
             "tsVersion": "",
             "unstableFlag": true,
             "v8Version": deno_core::v8_version(),
