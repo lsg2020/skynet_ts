@@ -8,9 +8,9 @@ import type {
   Message,
   Method,
   ReflectionObject
-} from "./vendor/protobuf";
+} from "protobufjs/index";
 
-import * as protobuf from "./vendor/protobuf@v6.10.2.js";
+import * as protobuf from "protobufjs/protobuf";
 
 const lib = protobuf.default.exports as any;
 
