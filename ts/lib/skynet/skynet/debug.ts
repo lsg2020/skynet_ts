@@ -124,15 +124,14 @@ export let v8inspector = {
             } else if (cmd == "disable") {
                 v8inspector.disable();
             } else if (cmd == "connect") {
-                let session_id = 0;//Deno.v8inspect.v8inspect_connect(proxy_addr, proty_ptype, pause_addr, resume_addr);
+                let session_id = V8Inspector.v8inspector_connect(proxy_addr, proty_ptype, pause_addr, resume_addr);
                 skynet.retpack(context, session_id);
             } else if (cmd == "disconnect") {
                 let [session_id] = params as [number];
-                //Deno.v8inspect.v8inspect_disconnect(session_id);
+                V8Inspector.v8inspector_disconnect(session_id);
             } else if (cmd == "msg") {
                 let [session_id, message] = params as [number, string];
-                //Deno.skynet.v8inspector_message(session_id, new TextEncoder().encode(message));
-                //Deno.core.inspector_message(session_id, new TextEncoder().encode(message));
+                V8Inspector.v8inspector_message(session_id, new TextEncoder().encode(message));
             }
         });
     },

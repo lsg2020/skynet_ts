@@ -16,6 +16,7 @@ mod mod_skynet;
 pub use mod_skynet::get_backing_store_slice_mut;
 pub use mod_skynet::BufVec;
 mod mod_tls;
+mod mod_inspector;
 
 #[repr(C)]
 pub struct snjs<'a> {
@@ -23,6 +24,7 @@ pub struct snjs<'a> {
     tokio_rt: *mut tokio::runtime::Runtime,
     runtime: Box<deno_core::JsRuntime>,
     custom_archive: *mut c_void,
+    inspector_session_len: usize,
     waker: *mut std::task::Waker,
     waker_context: *mut std::task::Context<'a>,
     waker_exists: Arc<AtomicBool>,
@@ -34,9 +36,11 @@ pub struct snjs<'a> {
 
 pub struct ContextData {
     skynet: *const libc::c_void,
+    ctx: *const libc::c_void,
     bs: Option<v8::SharedRef<v8::BackingStore>>,
     cb: Option<v8::Global<v8::Function>>,
     module_search_paths: Vec<String>,
+    inspector: Option<Box<mod_inspector::Inspector>>,
 }
 pub type SkynetContext = *mut ContextData;
 
@@ -60,6 +64,8 @@ pub extern "C" fn snjs_create() -> *mut snjs<'static> {
     let mut plugin_js = skynet_plugin.init_js();
     let tls_plugin = mod_tls::init();
     plugin_js.append(&mut tls_plugin.init_js());
+    let inspector_plugin = mod_inspector::init();
+    plugin_js.append(&mut inspector_plugin.init_js());
 
     let perm_ext = deno_core::Extension::builder()
         .state(move |state| {
@@ -108,6 +114,7 @@ pub extern "C" fn snjs_create() -> *mut snjs<'static> {
         ops::tty::init(),
         skynet_plugin,
         tls_plugin,
+        inspector_plugin,
         // Permissions ext (worker specific state)
         perm_ext,
     ];
@@ -141,6 +148,7 @@ pub extern "C" fn snjs_create() -> *mut snjs<'static> {
         tokio_rt: unsafe { TOKIO_RT },
         tokio_guard: ptr::null_mut(),
         custom_archive: custom_archive,
+        inspector_session_len: 0,
         waker: ptr::null_mut(),
         waker_context: ptr::null_mut(),
         waker_exists: Arc::new(AtomicBool::new(false)),
@@ -208,7 +216,7 @@ pub extern "C" fn dispatch_th_cb(
         unsafe { ctx.runtime.v8_isolate().enter() };
         ctx.locker = Box::into_raw(Box::new(v8::Locker::new(
             ctx.runtime.v8_isolate(),
-            ctx.custom_archive,
+            if ctx.inspector_session_len > 0 { ctx.custom_archive } else { std::ptr::null_mut() },
         )));
 
         let rt = unsafe { &mut *ctx.tokio_rt };
@@ -246,7 +254,7 @@ pub extern "C" fn dispatch_cb(
         unsafe { ctx.runtime.v8_isolate().enter() };
         ctx.locker = Box::into_raw(Box::new(v8::Locker::new(
             ctx.runtime.v8_isolate(),
-            ctx.custom_archive,
+            if ctx.inspector_session_len > 0 { ctx.custom_archive } else { std::ptr::null_mut() },
         )));
         let rt = unsafe { &mut *ctx.tokio_rt };
         ctx.tokio_guard = Box::into_raw(Box::new(rt.enter()));
@@ -254,13 +262,13 @@ pub extern "C" fn dispatch_cb(
 
     let raw_type = stype & 0xffff;
     if raw_type == interface::PTYPE_DENO_ASYNC {
-        ctx.waker_exists.store(false, Ordering::Relaxed);
-        let _r = ctx
-            .runtime
-            .poll_event_loop(unsafe { &mut *ctx.waker_context });
     } else {
         mod_skynet::dispatch(ctx, raw_type, session, source, msg as *const u8, sz);
     }
+    ctx.waker_exists.store(false, Ordering::Relaxed);
+    let _r = ctx
+        .runtime
+        .poll_event_loop(unsafe { &mut *ctx.waker_context });
 
     if stype & 0x40000 == 0 {
         unsafe {
@@ -281,14 +289,14 @@ pub extern "C" fn dispatch_cb(
 #[no_mangle]
 pub extern "C" fn init_cb(
     skynet: *const c_void,
-    ctx: *mut snjs,
+    ctx_ptr: *mut snjs,
     _stype: c_int,
     _session: c_int,
     _source: c_int,
     msg: *const c_void,
     _sz: size_t,
 ) -> c_int {
-    let ctx = unsafe { &mut *ctx };
+    let ctx = unsafe { &mut *ctx_ptr };
     unsafe { interface::skynet_callback(ctx.skynet, ptr::null_mut(), ptr::null_mut()) };
 
     let args = unsafe { CStr::from_ptr(msg as *const c_char) }
@@ -324,11 +332,20 @@ pub extern "C" fn init_cb(
         );
         let _r = ctx.runtime.execute("", &script);
 
+        let inspector = if get_env(ctx.skynet, "js_inspector", "false") == "true" {
+            let global = ctx.runtime.global_context();
+            Some(mod_inspector::Inspector::new(&mut ctx.runtime.handle_scope(), global))
+        } else {
+            None
+        };
+
         let data = Box::into_raw(Box::new(ContextData {
             skynet: ctx.skynet,
+            ctx: ctx_ptr as *const libc::c_void,
             bs: None,
             cb: None,
             module_search_paths: Vec::new(),
+            inspector: inspector,
         }));
         ctx.runtime
             .op_state()
@@ -419,7 +436,7 @@ pub extern "C" fn snjs_init(ptr: *mut snjs, skynet: *const c_void, args: *const 
     let waker = Box::new(async_task::waker_fn(move || {
         // println!("-=============== waker");
         if waker_exists.load(Ordering::Relaxed) {
-            return;
+            //return;
         }
         waker_exists.store(true, Ordering::Relaxed);
         unsafe {

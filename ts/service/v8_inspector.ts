@@ -20,7 +20,7 @@ let services: Map<number, ServiceInfo> = new Map();
 async function command_enable(context: skynet.CONTEXT, addr: number, name: string) {
     console.log(`v8_inspector enable:${addr}`);
     if (services.get(addr)) {
-        skynet.retpack(context, skynet.self(), PTYPE_INSPECTOR, `ws://${listen_ip}/pause/${addr}`, `ws://${listen_ip}/resume/${addr}`);
+        skynet.retpack(context, skynet.self(), PTYPE_INSPECTOR, `ws://${listen_addr}/pause/${addr}`, `http://${listen_addr}/resume/${addr}`);
         return;
     }
     services.set(addr, {
@@ -29,8 +29,9 @@ async function command_enable(context: skynet.CONTEXT, addr: number, name: strin
         listen_addr: listen_addr,
         sessions: new Map(),
         devtools: `devtools://devtools/bundled/inspector.html?v8only=true&ws=${listen_addr}/ws/${addr}`,
+        //devtools: `devtools://devtools/bundled/js_app.html?ws=${listen_addr}/ws/${addr}&experiments=true&v8only=true`,
     });
-    skynet.retpack(context, skynet.self(), PTYPE_INSPECTOR, `ws://${listen_ip}/pause/${addr}`, `ws://${listen_ip}/resume/${addr}`);
+    skynet.retpack(context, skynet.self(), PTYPE_INSPECTOR, `ws://${listen_addr}/pause/${addr}`, `http://${listen_addr}/resume/${addr}`);
     (async () => {
         await skynet.call(addr, "debug", "LINK");
         command_disable(context, addr);
@@ -58,9 +59,9 @@ skynet.register_protocol({
     unpack: skynet.string_unpack,
     dispatch: (context: skynet.CONTEXT, msg: string) => {
         let space_index = msg.indexOf("{");
-        let session_id = Number(msg.slice(0, space_index - 1));
+        let session_id = Number(msg.slice(0, space_index));
         msg = msg.slice(space_index);
-        let service = services.get(session_id);
+        let service = services.get(context.source);
         if (!service)
             return;
         let ws = service.sessions.get(session_id);
@@ -158,6 +159,7 @@ http_router.add("/ws/:addr", async (req: http_server.ServerRequest, params: Map<
             return;
         skynet.send(service!.addr, "debug", "v8inspector", "disconnect", session_id);
         service!.sessions.delete(session_id);
+
         if (service!.sessions.size == 0 && service!.proxy) {
             service!.proxy.send("quit");
             service!.proxy.close();
@@ -183,8 +185,7 @@ http_router.add("/ws/:addr", async (req: http_server.ServerRequest, params: Map<
             else if (typeof event == "string") {
                 if (service!.proxy) {
                     service!.proxy.send(session_id + event);
-                }
-                else {
+                } else {
                     skynet.send(service!.addr, "debug", "v8inspector", "msg", session_id, event);
                 }
             }
