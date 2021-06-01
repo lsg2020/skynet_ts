@@ -5,15 +5,18 @@ import * as router from "x/router/mod";
 import * as ws from "std/ws/mod";
 
 let [_, listen_ip, listen_port] = JS_INIT_ARGS.split(" ");
-let listen_addr = `${listen_ip}:${listen_port}`;
+let listen_addr = `${listen_ip == "0.0.0.0" ? "127.0.0.1" : listen_ip}:${listen_port}`;
 let PTYPE_INSPECTOR = 101;
+
+function devtools_addr(service_addr: number, listen_addr: string) {
+    //`devtools://devtools/bundled/js_app.html?ws=${listen_addr}/ws/${addr}&experiments=true&v8only=true`
+    return `devtools://devtools/bundled/inspector.html?v8only=true&ws=${listen_addr}/ws/${service_addr}`;
+}
 
 type ServiceInfo = {
     addr: number,
     name: string,
-    listen_addr: string,
     sessions: Map<number, ws.WebSocket>,
-    devtools: string,
     proxy?: ws.WebSocket,
 };
 let services: Map<number, ServiceInfo> = new Map();
@@ -26,10 +29,7 @@ async function command_enable(context: skynet.CONTEXT, addr: number, name: strin
     services.set(addr, {
         addr: addr,
         name: name,
-        listen_addr: listen_addr,
         sessions: new Map(),
-        devtools: `devtools://devtools/bundled/inspector.html?v8only=true&ws=${listen_addr}/ws/${addr}`,
-        //devtools: `devtools://devtools/bundled/js_app.html?ws=${listen_addr}/ws/${addr}&experiments=true&v8only=true`,
     });
     skynet.retpack(context, skynet.self(), PTYPE_INSPECTOR, `ws://${listen_addr}/pause/${addr}`, `http://${listen_addr}/resume/${addr}`);
     (async () => {
@@ -72,6 +72,7 @@ skynet.register_protocol({
 });
 let http_router = new router.Node();
 http_router.add("/", (req: http_server.ServerRequest, params: Map<string, string>) => {
+    let local_addr = req.conn.localAddr as Deno.NetAddr;
     let template = `
     <!doctype html>
 <html>
@@ -91,7 +92,7 @@ http_router.add("/", (req: http_server.ServerRequest, params: Map<string, string
     `;
     let contents = ["# skynet_ts v8 inspector"];
     services.forEach((s) => {
-        contents.push(`## [${s.name}:${s.addr}](${s.devtools})\n* ${s.listen_addr}\n* ${s.devtools}\n`);
+        contents.push(`## [${s.name}:${s.addr}](${devtools_addr(s.addr, `${local_addr.hostname}:${listen_port}`)})\n* ${`${local_addr.hostname}:${listen_port}`}\n* ${devtools_addr(s.addr, `${local_addr.hostname}:${listen_port}`)}\n`);
     });
     req.respond({
         body: template.replace("_CONTENT_", contents.join("\n")),
@@ -193,13 +194,14 @@ http_router.add("/ws/:addr", async (req: http_server.ServerRequest, params: Map<
     });
 });
 http_router.add("/json", async (req: http_server.ServerRequest, params: Map<string, string>) => {
+    let local_addr = req.conn.localAddr as Deno.NetAddr;
     let response: string[] = [];
     services.forEach((service, addr) => {
         let debug_template: any = {
             ["_DEBUG_ID_"]: `${addr}`,
             ["_DEBUG_NAME_"]: `:${addr}`,
             ["_DEBUG_ADDR_"]: `${listen_addr}/ws/${addr}`,
-            ["_DEBUG_DEVTOOLS_"]: `${service.devtools}`,
+            ["_DEBUG_DEVTOOLS_"]: `${devtools_addr(service.addr, `${local_addr.hostname}:${listen_port}`)}`,
         };
         let template = `
         {
