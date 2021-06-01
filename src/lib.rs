@@ -15,8 +15,8 @@ mod loader;
 mod mod_skynet;
 pub use mod_skynet::get_backing_store_slice_mut;
 pub use mod_skynet::BufVec;
-mod mod_tls;
 mod mod_inspector;
+mod mod_tls;
 
 #[repr(C)]
 pub struct snjs<'a> {
@@ -216,7 +216,11 @@ pub extern "C" fn dispatch_th_cb(
         unsafe { ctx.runtime.v8_isolate().enter() };
         ctx.locker = Box::into_raw(Box::new(v8::Locker::new(
             ctx.runtime.v8_isolate(),
-            if ctx.inspector_session_len > 0 { ctx.custom_archive } else { std::ptr::null_mut() },
+            if ctx.inspector_session_len > 0 {
+                ctx.custom_archive
+            } else {
+                std::ptr::null_mut()
+            },
         )));
 
         let rt = unsafe { &mut *ctx.tokio_rt };
@@ -254,7 +258,11 @@ pub extern "C" fn dispatch_cb(
         unsafe { ctx.runtime.v8_isolate().enter() };
         ctx.locker = Box::into_raw(Box::new(v8::Locker::new(
             ctx.runtime.v8_isolate(),
-            if ctx.inspector_session_len > 0 { ctx.custom_archive } else { std::ptr::null_mut() },
+            if ctx.inspector_session_len > 0 {
+                ctx.custom_archive
+            } else {
+                std::ptr::null_mut()
+            },
         )));
         let rt = unsafe { &mut *ctx.tokio_rt };
         ctx.tokio_guard = Box::into_raw(Box::new(rt.enter()));
@@ -262,13 +270,14 @@ pub extern "C" fn dispatch_cb(
 
     let raw_type = stype & 0xffff;
     if raw_type == interface::PTYPE_DENO_ASYNC {
+        ctx.waker_exists.store(false, Ordering::Relaxed);
+        ctx.runtime.register_waker(unsafe { &mut *ctx.waker_context });
     } else {
         mod_skynet::dispatch(ctx, raw_type, session, source, msg as *const u8, sz);
     }
-    ctx.waker_exists.store(false, Ordering::Relaxed);
     let _r = ctx
-        .runtime
-        .poll_event_loop(unsafe { &mut *ctx.waker_context });
+    .runtime
+    .poll_event_loop(unsafe { &mut *ctx.waker_context });
 
     if stype & 0x40000 == 0 {
         unsafe {
@@ -334,7 +343,10 @@ pub extern "C" fn init_cb(
 
         let inspector = if get_env(ctx.skynet, "js_inspector", "false") == "true" {
             let global = ctx.runtime.global_context();
-            Some(mod_inspector::Inspector::new(&mut ctx.runtime.handle_scope(), global))
+            Some(mod_inspector::Inspector::new(
+                &mut ctx.runtime.handle_scope(),
+                global,
+            ))
         } else {
             None
         };
@@ -354,9 +366,11 @@ pub extern "C" fn init_cb(
         ctx.context = data;
     }
 
+    // register JsRuntimeState.waker
+    ctx.runtime.register_waker(unsafe { &mut *ctx.waker_context });
     let _r = ctx
         .runtime
-        .poll_event_loop(unsafe { &mut *ctx.waker_context }); // register JsRuntimeState.waker
+        .poll_event_loop(unsafe { &mut *ctx.waker_context });
     let base_path = url::Url::from_file_path(std::env::current_dir().unwrap())
         .unwrap()
         .to_string()
@@ -434,10 +448,11 @@ pub extern "C" fn snjs_init(ptr: *mut snjs, skynet: *const c_void, args: *const 
     unsafe impl Sync for SharedWaker {}
     let shared = SharedWaker(skynet.clone());
     let waker = Box::new(async_task::waker_fn(move || {
-        // println!("-=============== waker");
+        //println!("-=============== waker {:?}", shared.0);
         if waker_exists.load(Ordering::Relaxed) {
-            //return;
+            return;
         }
+        //println!("-=============== waker -------- {:?}", shared.0);
         waker_exists.store(true, Ordering::Relaxed);
         unsafe {
             interface::skynet_send(
