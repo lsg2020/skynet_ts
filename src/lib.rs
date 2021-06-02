@@ -4,8 +4,8 @@ use libc::{c_char, c_int, c_void, size_t};
 use std::ffi::CStr;
 use std::mem::drop;
 use std::ptr;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+//use std::sync::atomic::{AtomicBool, Ordering};
+//use std::sync::Arc;
 
 use deno_runtime::ops;
 use rusty_v8 as v8;
@@ -27,7 +27,6 @@ pub struct snjs<'a> {
     inspector_session_len: usize,
     waker: *mut std::task::Waker,
     waker_context: *mut std::task::Context<'a>,
-    waker_exists: Arc<AtomicBool>,
     context: SkynetContext,
 
     locker: *mut v8::Locker,
@@ -151,7 +150,6 @@ pub extern "C" fn snjs_create() -> *mut snjs<'static> {
         inspector_session_len: 0,
         waker: ptr::null_mut(),
         waker_context: ptr::null_mut(),
-        waker_exists: Arc::new(AtomicBool::new(false)),
         context: ptr::null_mut(),
     });
 
@@ -270,14 +268,12 @@ pub extern "C" fn dispatch_cb(
 
     let raw_type = stype & 0xffff;
     if raw_type == interface::PTYPE_DENO_ASYNC {
-        ctx.waker_exists.store(false, Ordering::Relaxed);
-        ctx.runtime.register_waker(unsafe { &mut *ctx.waker_context });
+        let _r = ctx
+            .runtime
+            .poll_event_loop(unsafe { &mut *ctx.waker_context });
     } else {
         mod_skynet::dispatch(ctx, raw_type, session, source, msg as *const u8, sz);
     }
-    let _r = ctx
-    .runtime
-    .poll_event_loop(unsafe { &mut *ctx.waker_context });
 
     if stype & 0x40000 == 0 {
         unsafe {
@@ -367,7 +363,6 @@ pub extern "C" fn init_cb(
     }
 
     // register JsRuntimeState.waker
-    ctx.runtime.register_waker(unsafe { &mut *ctx.waker_context });
     let _r = ctx
         .runtime
         .poll_event_loop(unsafe { &mut *ctx.waker_context });
@@ -442,18 +437,12 @@ pub extern "C" fn snjs_init(ptr: *mut snjs, skynet: *const c_void, args: *const 
         libc::strtoul(self_handle.add(1), &mut endp as *mut _, 16) as u32
     };
 
-    let waker_exists = ctx.waker_exists.clone();
     struct SharedWaker(*const c_void);
     unsafe impl Send for SharedWaker {}
     unsafe impl Sync for SharedWaker {}
     let shared = SharedWaker(skynet.clone());
     let waker = Box::new(async_task::waker_fn(move || {
-        //println!("-=============== waker {:?}", shared.0);
-        if waker_exists.load(Ordering::Relaxed) {
-            return;
-        }
-        //println!("-=============== waker -------- {:?}", shared.0);
-        waker_exists.store(true, Ordering::Relaxed);
+        // println!("-=============== waker {:?}", shared.0);
         unsafe {
             interface::skynet_send(
                 shared.0,
