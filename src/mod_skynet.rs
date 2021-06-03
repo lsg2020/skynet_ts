@@ -150,7 +150,7 @@ pub fn dispatch(
 }
 
 pub fn op_skynet_callback(
-    _state: &mut deno_core::JsRuntimeState,
+    _state: std::cell::RefMut<deno_core::JsRuntimeState>,
     op_state: Rc<RefCell<OpState>>,
     scope: &mut v8::HandleScope,
     args: v8::FunctionCallbackArguments,
@@ -169,7 +169,7 @@ pub fn op_skynet_callback(
 }
 
 pub fn op_skynet_shared_bs(
-    _state: &mut deno_core::JsRuntimeState,
+    _state: std::cell::RefMut<deno_core::JsRuntimeState>,
     op_state: Rc<RefCell<OpState>>,
     scope: &mut v8::HandleScope,
     _args: v8::FunctionCallbackArguments,
@@ -349,7 +349,7 @@ pub fn op_skynet_genid(state: &mut OpState, _args: (), _: ()) -> Result<i32, Any
 }
 
 pub fn op_skynet_free(
-    _state: &mut deno_core::JsRuntimeState,
+    _state: std::cell::RefMut<deno_core::JsRuntimeState>,
     _op_state: Rc<RefCell<OpState>>,
     scope: &mut v8::HandleScope,
     args: v8::FunctionCallbackArguments,
@@ -374,7 +374,7 @@ pub unsafe fn get_backing_store_slice_mut(
 }
 
 pub fn op_skynet_fetch_message(
-    _state: &mut deno_core::JsRuntimeState,
+    _state: std::cell::RefMut<deno_core::JsRuntimeState>,
     _op_state: Rc<RefCell<OpState>>,
     scope: &mut v8::HandleScope,
     args: v8::FunctionCallbackArguments,
@@ -481,7 +481,7 @@ pub fn get_shared_bs(
 }
 
 pub fn op_skynet_socket_unpack(
-    _state: &mut deno_core::JsRuntimeState,
+    _state: std::cell::RefMut<deno_core::JsRuntimeState>,
     op_state: Rc<RefCell<OpState>>,
     scope: &mut v8::HandleScope,
     args: v8::FunctionCallbackArguments,
@@ -676,7 +676,7 @@ pub fn op_skynet_socket_udp_connect(
 
 pub type BufVec = smallvec::SmallVec<[ZeroCopyBuf; 2]>;
 pub fn op_skynet_socket_alloc_msg(
-    _state: &mut deno_core::JsRuntimeState,
+    _state: std::cell::RefMut<deno_core::JsRuntimeState>,
     _op_state: Rc<RefCell<OpState>>,
     scope: &mut v8::HandleScope,
     args: v8::FunctionCallbackArguments,
@@ -726,7 +726,7 @@ pub fn op_skynet_socket_alloc_msg(
 }
 
 pub fn op_skynet_socket_send(
-    _state: &mut deno_core::JsRuntimeState,
+    _state: std::cell::RefMut<deno_core::JsRuntimeState>,
     op_state: Rc<RefCell<OpState>>,
     scope: &mut v8::HandleScope,
     args: v8::FunctionCallbackArguments,
@@ -754,7 +754,7 @@ pub fn op_skynet_socket_send(
 }
 
 pub fn op_skynet_socket_send_lowpriority(
-    _state: &mut deno_core::JsRuntimeState,
+    _state: std::cell::RefMut<deno_core::JsRuntimeState>,
     op_state: Rc<RefCell<OpState>>,
     scope: &mut v8::HandleScope,
     args: v8::FunctionCallbackArguments,
@@ -783,7 +783,7 @@ pub fn op_skynet_socket_send_lowpriority(
 }
 
 pub fn op_skynet_socket_sendto(
-    _state: &mut deno_core::JsRuntimeState,
+    _state: std::cell::RefMut<deno_core::JsRuntimeState>,
     op_state: Rc<RefCell<OpState>>,
     scope: &mut v8::HandleScope,
     args: v8::FunctionCallbackArguments,

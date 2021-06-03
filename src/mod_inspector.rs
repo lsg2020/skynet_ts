@@ -39,12 +39,13 @@ pub fn init() -> Extension {
 }
 
 pub fn op_v8inspector_connect(
-    state: &mut deno_core::JsRuntimeState,
+    mut state: std::cell::RefMut<deno_core::JsRuntimeState>,
     op_state: Rc<RefCell<OpState>>,
     scope: &mut v8::HandleScope,
     args: v8::FunctionCallbackArguments,
     rv: &mut v8::ReturnValue,
 ) {
+    let state = &mut state;
     let proxy_addr = get_args!(scope, v8::Integer, args, 1).value();
     let proxy_ptype = get_args!(scope, v8::Integer, args, 2).value();
     let pause_proxy_addr = get_args!(scope, v8::String, args, 3).to_rust_string_lossy(scope);
@@ -81,12 +82,13 @@ pub fn op_v8inspector_connect(
 }
 
 pub fn op_v8inspector_disconnect(
-    state: &mut deno_core::JsRuntimeState,
+    mut state: std::cell::RefMut<deno_core::JsRuntimeState>,
     op_state: Rc<RefCell<OpState>>,
     scope: &mut v8::HandleScope,
     args: v8::FunctionCallbackArguments,
     _rv: &mut v8::ReturnValue,
 ) {
+    let state = &mut state;
     let session_id = get_args!(scope, v8::Integer, args, 1).value();
 
     let mut op_state_rc = op_state.borrow_mut();
@@ -98,36 +100,46 @@ pub fn op_v8inspector_disconnect(
 }
 
 pub fn op_v8inspector_message(
-    state: &mut deno_core::JsRuntimeState,
+    mut state_rc: std::cell::RefMut<deno_core::JsRuntimeState>,
     op_state: Rc<RefCell<OpState>>,
     scope: &mut v8::HandleScope,
     args: v8::FunctionCallbackArguments,
     _rv: &mut v8::ReturnValue,
 ) {
-    let session_id = get_args!(scope, v8::Integer, args, 1).value();
-    let msg = v8::Local::<v8::ArrayBufferView>::try_from(args.get(2))
-        .map(|view| ZeroCopyBuf::new(scope, view))
-        .map_err(|err| {
-            let msg = format!("Invalid argument at position {}: {}", 2, err);
-            let msg = v8::String::new(scope, &msg).unwrap();
-            v8::Exception::type_error(scope, msg)
-        });
+    let mut v8_session: *mut v8::inspector::V8InspectorSession = std::ptr::null_mut();
+    let mut buf = Vec::new();
+   
+    {
+        let state = &mut state_rc;
+        let session_id = get_args!(scope, v8::Integer, args, 1).value();
+        let msg = v8::Local::<v8::ArrayBufferView>::try_from(args.get(2))
+            .map(|view| ZeroCopyBuf::new(scope, view))
+            .map_err(|err| {
+                let msg = format!("Invalid argument at position {}: {}", 2, err);
+                let msg = v8::String::new(scope, &msg).unwrap();
+                v8::Exception::type_error(scope, msg)
+            });
+    
+        let mut op_state_rc = op_state.borrow_mut();
+        let context = op_state_rc.borrow_mut::<crate::SkynetContext>();
+        let context = unsafe { &mut **context };
+    
+        create_inspector(context, scope, state);
+    
+        let v8inspector = &mut context.inspector.as_mut().unwrap().v8_sessions;
+        if let Some(session) = v8inspector.get_mut(&session_id) {
+            let b = &msg.unwrap() as &[u8];
+            buf.resize(b.len(), 0);
+            buf[0..b.len()].copy_from_slice(b);
+    
+            v8_session = *session;
+        }
+        drop(state_rc);
+    }
 
-    let mut op_state_rc = op_state.borrow_mut();
-    let context = op_state_rc.borrow_mut::<crate::SkynetContext>();
-    let context = unsafe { &mut **context };
-
-    create_inspector(context, scope, state);
-
-    let v8inspector = &mut context.inspector.as_mut().unwrap().v8_sessions;
-    if let Some(session) = v8inspector.get_mut(&session_id) {
-        let mut buf = Vec::new();
-        let b = &msg.unwrap() as &[u8];
-        buf.resize(b.len(), 0);
-        buf[0..b.len()].copy_from_slice(b);
-
+    if v8_session != std::ptr::null_mut() {
         unsafe {
-            (*(*session)).dispatch_protocol_message(StringView::from(&buf[..]));
+            (*(v8_session)).dispatch_protocol_message(StringView::from(&buf[..]));
         }
     }
 }

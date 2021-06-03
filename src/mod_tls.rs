@@ -67,7 +67,7 @@ macro_rules! bio_pending {
 }
 
 pub fn op_tls_new_ctx(
-    _state: &mut deno_core::JsRuntimeState,
+    _state: std::cell::RefMut<deno_core::JsRuntimeState>,
     _op_state: Rc<RefCell<OpState>>,
     scope: &mut v8::HandleScope,
     _args: v8::FunctionCallbackArguments,
@@ -85,7 +85,7 @@ pub fn op_tls_new_ctx(
 }
 
 pub fn op_tls_free_ctx(
-    _state: &mut deno_core::JsRuntimeState,
+    _state: std::cell::RefMut<deno_core::JsRuntimeState>,
     _op_state: Rc<RefCell<OpState>>,
     scope: &mut v8::HandleScope,
     args: v8::FunctionCallbackArguments,
@@ -97,7 +97,7 @@ pub fn op_tls_free_ctx(
 }
 
 pub fn op_tls_set_cert(
-    _state: &mut deno_core::JsRuntimeState,
+    _state: std::cell::RefMut<deno_core::JsRuntimeState>,
     _op_state: Rc<RefCell<OpState>>,
     scope: &mut v8::HandleScope,
     args: v8::FunctionCallbackArguments,
@@ -170,7 +170,7 @@ fn _init_bio(scope: &mut v8::HandleScope, tls_p: &mut TlsContext, ctx_p: &mut Ss
 }
 
 pub fn op_tls_new_tls(
-    _state: &mut deno_core::JsRuntimeState,
+    _state: std::cell::RefMut<deno_core::JsRuntimeState>,
     _op_state: Rc<RefCell<OpState>>,
     scope: &mut v8::HandleScope,
     args: v8::FunctionCallbackArguments,
@@ -215,7 +215,7 @@ pub fn op_tls_new_tls(
 }
 
 pub fn op_tls_free_tls(
-    _state: &mut deno_core::JsRuntimeState,
+    _state: std::cell::RefMut<deno_core::JsRuntimeState>,
     _op_state: Rc<RefCell<OpState>>,
     scope: &mut v8::HandleScope,
     args: v8::FunctionCallbackArguments,
@@ -233,7 +233,7 @@ pub fn op_tls_free_tls(
 }
 
 pub fn op_tls_finished(
-    _state: &mut deno_core::JsRuntimeState,
+    _state: std::cell::RefMut<deno_core::JsRuntimeState>,
     _op_state: Rc<RefCell<OpState>>,
     scope: &mut v8::HandleScope,
     args: v8::FunctionCallbackArguments,
@@ -251,7 +251,7 @@ pub fn op_tls_finished(
 }
 
 pub fn op_tls_handshake(
-    _state: &mut deno_core::JsRuntimeState,
+    _state: std::cell::RefMut<deno_core::JsRuntimeState>,
     _op_state: Rc<RefCell<OpState>>,
     scope: &mut v8::HandleScope,
     args: v8::FunctionCallbackArguments,
@@ -285,7 +285,7 @@ pub fn op_tls_handshake(
 }
 
 pub fn op_tls_bio_write(
-    _state: &mut deno_core::JsRuntimeState,
+    _state: std::cell::RefMut<deno_core::JsRuntimeState>,
     _op_state: Rc<RefCell<OpState>>,
     scope: &mut v8::HandleScope,
     args: v8::FunctionCallbackArguments,
@@ -342,7 +342,7 @@ pub fn op_tls_bio_write(
 }
 
 pub fn op_tls_bio_read(
-    _state: &mut deno_core::JsRuntimeState,
+    _state: std::cell::RefMut<deno_core::JsRuntimeState>,
     _op_state: Rc<RefCell<OpState>>,
     scope: &mut v8::HandleScope,
     args: v8::FunctionCallbackArguments,
@@ -386,7 +386,7 @@ pub fn op_tls_bio_read(
 }
 
 pub fn op_tls_ssl_write(
-    _state: &mut deno_core::JsRuntimeState,
+    _state: std::cell::RefMut<deno_core::JsRuntimeState>,
     _op_state: Rc<RefCell<OpState>>,
     scope: &mut v8::HandleScope,
     args: v8::FunctionCallbackArguments,
@@ -439,7 +439,7 @@ pub fn op_tls_ssl_write(
 }
 
 pub fn op_tls_ssl_read(
-    _state: &mut deno_core::JsRuntimeState,
+    _state: std::cell::RefMut<deno_core::JsRuntimeState>,
     _op_state: Rc<RefCell<OpState>>,
     scope: &mut v8::HandleScope,
     args: v8::FunctionCallbackArguments,
