@@ -1,6 +1,6 @@
 ## JSON decode
 * [lua json](https://github.com/lsg2020/skynet_ts_demo/blob/demo/service/benchmarks/json_lua.lua) decode result  amount: 100000          ms:2400
-* [cjson.so](https://github.com/lsg2020/skynet_ts_demo/blob/demo/service/benchmarks/json_lua.lua) decode result     amount: 100000          ms:310
+* [cjson.so](https://github.com/lsg2020/skynet_ts_demo/blob/demo/service/benchmarks/json_cjson.lua) decode result     amount: 100000          ms:310
 * [JS](https://github.com/lsg2020/skynet_ts_demo/blob/demo/demo/service/benchmarks/pure_js_json.ts) decode result   amount:100000           ms:679
 * [V8](https://github.com/lsg2020/skynet_ts_demo/blob/demo/demo/service/benchmarks/v8_json.ts) decode result   amount:100000           ms:160
 
