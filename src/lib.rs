@@ -253,39 +253,29 @@ pub extern "C" fn dispatch_cb(
     // println!("======= dispatch_cb {} {}", stype, sz);
 
     if stype & 0x40000 == 0 {
-        unsafe { ctx.runtime.v8_isolate().enter() };
-        ctx.locker = Box::into_raw(Box::new(v8::Locker::new(
-            ctx.runtime.v8_isolate(),
-            if ctx.inspector_session_len > 0 {
-                ctx.custom_archive
-            } else {
-                std::ptr::null_mut()
-            },
-        )));
+        let _isolate_scope = v8::IsolateScope::new(ctx.runtime.v8_isolate());
+        let _locker = v8::Locker::new(ctx.runtime.v8_isolate(), ctx.custom_archive);
+        let _auto_check = deno_core::IsolateAutoCheck::new(ctx.runtime.v8_isolate());
         let rt = unsafe { &mut *ctx.tokio_rt };
-        ctx.tokio_guard = Box::into_raw(Box::new(rt.enter()));
-    }
+        let _rt_guard = rt.enter();
 
-    let raw_type = stype & 0xffff;
-    if raw_type == interface::PTYPE_DENO_ASYNC {
-        let _r = ctx
-            .runtime
-            .poll_event_loop(unsafe { &mut *ctx.waker_context });
+        let raw_type = stype & 0xffff;
+        if raw_type == interface::PTYPE_DENO_ASYNC {
+            let _r = ctx
+                .runtime
+                .poll_event_loop(unsafe { &mut *ctx.waker_context });
+        } else {
+            mod_skynet::dispatch(ctx, raw_type, session, source, msg as *const u8, sz);
+        }
     } else {
-        mod_skynet::dispatch(ctx, raw_type, session, source, msg as *const u8, sz);
-    }
-
-    if stype & 0x40000 == 0 {
-        unsafe {
-            let _r = Box::from_raw(ctx.tokio_guard);
-            ctx.tokio_guard = ptr::null_mut();
-        };
-        v8::HandleScope::new(ctx.runtime.v8_isolate());
-        unsafe {
-            Box::from_raw(ctx.locker);
-            ctx.locker = ptr::null_mut();
-        };
-        unsafe { ctx.runtime.v8_isolate().exit() };
+        let raw_type = stype & 0xffff;
+        if raw_type == interface::PTYPE_DENO_ASYNC {
+            let _r = ctx
+                .runtime
+                .poll_event_loop(unsafe { &mut *ctx.waker_context });
+        } else {
+            mod_skynet::dispatch(ctx, raw_type, session, source, msg as *const u8, sz);
+        }
     }
 
     0
