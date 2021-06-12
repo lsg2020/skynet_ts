@@ -59,12 +59,11 @@ pub extern "C" fn snjs_create() -> *mut snjs<'static> {
         unsafe { TOKIO_RT = Box::into_raw(rt) };
     });
 
-    let skynet_plugin = mod_skynet::init();
-    let mut plugin_js = skynet_plugin.init_js();
-    let tls_plugin = mod_tls::init();
-    plugin_js.append(&mut tls_plugin.init_js());
-    let inspector_plugin = mod_inspector::init();
-    plugin_js.append(&mut inspector_plugin.init_js());
+    let plugin_js = vec![
+        ("skynet_ts:01_skynet.js", include_str!("01_skynet.js")),
+        ("skynet_ts:01_tls.js", include_str!("01_tls.js")),
+        ("skynet_ts:01_inspector.js", include_str!("01_inspector.js")),
+    ];
 
     let perm_ext = deno_core::Extension::builder()
         .state(move |state| {
@@ -79,8 +78,7 @@ pub extern "C" fn snjs_create() -> *mut snjs<'static> {
         deno_runtime::deno_webidl::init(),
         deno_runtime::deno_console::init(),
         deno_runtime::deno_url::init(),
-        deno_runtime::deno_web::init(),
-        //deno_runtime::deno_file::init(options.blob_url_store.clone(), options.location.clone()),
+        deno_runtime::deno_web::init(deno_runtime::deno_web::BlobUrlStore::default(), None),
         deno_runtime::deno_fetch::init::<deno_runtime::permissions::Permissions>(
             "".to_string(),
             None,
@@ -111,9 +109,9 @@ pub extern "C" fn snjs_create() -> *mut snjs<'static> {
         ops::signal::init(),
         ops::tls::init(),
         ops::tty::init(),
-        skynet_plugin,
-        tls_plugin,
-        inspector_plugin,
+        mod_skynet::init(),
+        mod_tls::init(),
+        mod_inspector::init(),
         // Permissions ext (worker specific state)
         perm_ext,
     ];
@@ -263,7 +261,7 @@ pub extern "C" fn dispatch_cb(
         if raw_type == interface::PTYPE_DENO_ASYNC {
             let _r = ctx
                 .runtime
-                .poll_event_loop(unsafe { &mut *ctx.waker_context });
+                .poll_event_loop(unsafe { &mut *ctx.waker_context }, false);
         } else {
             mod_skynet::dispatch(ctx, raw_type, session, source, msg as *const u8, sz);
         }
@@ -272,7 +270,7 @@ pub extern "C" fn dispatch_cb(
         if raw_type == interface::PTYPE_DENO_ASYNC {
             let _r = ctx
                 .runtime
-                .poll_event_loop(unsafe { &mut *ctx.waker_context });
+                .poll_event_loop(unsafe { &mut *ctx.waker_context }, false);
         } else {
             mod_skynet::dispatch(ctx, raw_type, session, source, msg as *const u8, sz);
         }
@@ -355,7 +353,7 @@ pub extern "C" fn init_cb(
     // register JsRuntimeState.waker
     let _r = ctx
         .runtime
-        .poll_event_loop(unsafe { &mut *ctx.waker_context });
+        .poll_event_loop(unsafe { &mut *ctx.waker_context }, false);
     let base_path = url::Url::from_file_path(std::env::current_dir().unwrap())
         .unwrap()
         .to_string()
@@ -378,6 +376,7 @@ pub extern "C" fn init_cb(
     let _r = ctx
         .runtime
         .execute(&base_path, &format!("JS_INIT_ARGS='{}'", args));
+
     let r = ctx.runtime.execute(&base_path, &loader_script);
     if let Err(err) = r {
         let err_msg =
