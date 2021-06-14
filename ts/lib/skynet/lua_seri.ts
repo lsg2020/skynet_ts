@@ -60,6 +60,8 @@ class encoder {
             this.encode_number(object);
         } else if (type == "bigint") {
             this.encode_bigint(object);
+        } else if (object instanceof UserData) {
+            this.encode_userdata(object);
         } else if (type == "object") {
             this.encode_object(object, depth+1);
         } else {
@@ -140,6 +142,10 @@ class encoder {
             }
             this.encode_nil();
         }
+    }
+    encode_userdata(v: UserData) {
+        this.write_u8(TYPE_USERDATA);
+        this.write_bigint(v.data);
     }
 
     combin_type(t: number, v: number) {
@@ -230,6 +236,11 @@ class decoder {
             return subtype ? true : false;
         } else if (type == TYPE_NUMBER) {
             return this.decode_number(subtype);
+        } else if (type == TYPE_USERDATA) {
+            this.ensure_read_size(8);
+            let v = pack.decode_biguint(this.bytes!, this.pos, 8, true);
+            this.pos += 8;
+            return new UserData(v);
         } else if (type == TYPE_SHORT_STRING) {
             return this.read_string(subtype);
         } else if (type == TYPE_LONG_STRING) {
@@ -375,4 +386,12 @@ export {
     encode_ex,
     decode,
     decode_ex,
+}
+
+export class UserData {
+    data: bigint;
+
+    constructor(v: bigint) {
+        this.data = v;
+    }
 }

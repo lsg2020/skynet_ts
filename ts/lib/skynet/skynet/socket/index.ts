@@ -315,11 +315,11 @@ function get_buffer(buffer: BUFFER_TYPE, sz?: number): [MSGPTR, number] {
     if (t == "bigint") {
         return [buffer as MSGPTR, sz!];
     } else if (t == "string") {
-        return skynet_rt.socket_alloc_msg(text_encoder.encode(buffer as string));
+        return skynet_rt.alloc_msg(text_encoder.encode(buffer as string));
     } else if (buffer instanceof Uint8Array) {
-        return skynet_rt.socket_alloc_msg(buffer);
+        return skynet_rt.alloc_msg(buffer);
     } else {
-        return skynet_rt.socket_alloc_msg(...(buffer as Uint8Array[]));
+        return skynet_rt.alloc_msg(...(buffer as Uint8Array[]));
     }
 }
 

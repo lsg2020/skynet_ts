@@ -65,11 +65,11 @@ pub fn init() -> Extension {
             ("op_skynet_free", Box::new(op_skynet_free)),
             ("op_skynet_shared_bs", Box::new(op_skynet_shared_bs)),
             ("op_skynet_callback", Box::new(op_skynet_callback)),
-            ("op_skynet_socket_unpack", Box::new(op_skynet_socket_unpack)),
             (
-                "op_skynet_socket_alloc_msg",
-                Box::new(op_skynet_socket_alloc_msg),
+                "op_skynet_alloc_msg",
+                Box::new(op_skynet_alloc_msg),
             ),
+            ("op_skynet_socket_unpack", Box::new(op_skynet_socket_unpack)),
             ("op_skynet_socket_send", Box::new(op_skynet_socket_send)),
             (
                 "op_skynet_socket_send_lowpriority",
@@ -675,7 +675,7 @@ pub fn op_skynet_socket_udp_connect(
 }
 
 pub type BufVec = smallvec::SmallVec<[ZeroCopyBuf; 2]>;
-pub fn op_skynet_socket_alloc_msg(
+pub fn op_skynet_alloc_msg(
     _state: std::cell::RefMut<deno_core::JsRuntimeState>,
     _op_state: Rc<RefCell<OpState>>,
     scope: &mut v8::HandleScope,

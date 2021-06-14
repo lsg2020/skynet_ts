@@ -43,7 +43,7 @@ export type CONTEXT = {
 };
 
 
-type SERVICE_ADDR = number | string;    // service_addr|service_name
+export type SERVICE_ADDR = number | string;    // service_addr|service_name
 
 let session_id_callback = new Map<number, [Function, Function, boolean?]>();  // session -> [resolve, reject, wakeup]
 let watching_response = new Map<number, SERVICE_ADDR>();     // session -> addr
@@ -420,6 +420,14 @@ export function dispatch(name: string, func?: Function) {
 export async function newservice(name: string, ...params: any[]) {
     let ret = await call(".launcher", PTYPE_NAME.LUA, "LAUNCH", "snjs", name, ...params);
     return ret[0] as number;
+}
+
+export async function uniqueservice(...params: any) {
+    return await call(".service", "lua", "LAUNCH", ...params);
+}
+
+export async function queryservice(...params: any) {
+    return await call(".service", "lua", "QUERY", ...params);
 }
 
 export function address(addr: SERVICE_ADDR) {

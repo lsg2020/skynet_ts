@@ -120,8 +120,8 @@
         core.opSync("op_skynet_socket_udp_connect", { id, host, port });
     }
 
-    function socket_alloc_msg(...buffers) {
-        return core.opRawSync("op_skynet_socket_alloc_msg", ...buffers);
+    function alloc_msg(...buffers) {
+        return core.opRawSync("op_skynet_alloc_msg", ...buffers);
     }
 
     function socket_send(id, msg, len) {
@@ -168,6 +168,7 @@
         shared_bs,
         callback,
         set_jslib_paths,
+        alloc_msg,
 
 
         socket_connect,
@@ -179,7 +180,6 @@
         socket_listen,
         socket_udp,
         socket_udp_connect,
-        socket_alloc_msg,
         socket_send,
         socket_send_lowpriority,
         socket_sendto,
