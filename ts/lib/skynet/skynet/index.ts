@@ -325,13 +325,29 @@ async function _yield_call(session: number, addr: SERVICE_ADDR): Promise<[Uint8A
     }
 }
 
-export async function call(addr: SERVICE_ADDR, typename: string, ...params: any[]) {
-    let p = proto.get(typename);
+export type CALL_OPTIONS = {
+    typename: string,
+    ret_type?: string,
+};
+export async function call(addr: SERVICE_ADDR, typename: string, ...params: any[]): Promise<any[]>;
+export async function call(addr: SERVICE_ADDR, ops: CALL_OPTIONS, ...params: any[]): Promise<any[]>;
+export async function call(addr: SERVICE_ADDR, typename: string|CALL_OPTIONS, ...params: any[]) {
+    let call_typename: string;
+    let ret_typename: string;
+    if (typeof(typename) == "string") {
+        call_typename = typename;
+        ret_typename = typename;
+    } else {
+        call_typename = typename.typename;
+        ret_typename = typename.ret_type || typename.typename;
+    }
+    let p = proto.get(call_typename);
     let pack = p!.pack!(...params);
     let session = skynet_rt.send(addr, p!.id, null, pack);
     let [buff, offset, sz] = await _yield_call(session, addr);
 
-    return p!.unpack!(buff, offset, sz);
+    let ret_p = proto.get(ret_typename);
+    return ret_p!.unpack!(buff, offset, sz);
 }
 
 export function ret(context: CONTEXT, pack?: Uint8Array) {

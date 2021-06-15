@@ -213,7 +213,8 @@ pub extern "C" fn dispatch_th_cb(
         ctx.locker = Box::into_raw(Box::new(v8::Locker::new(
             ctx.runtime.v8_isolate(),
             if ctx.inspector_session_len > 0 {
-                ctx.custom_archive
+                // ctx.custom_archive
+                std::ptr::null_mut()
             } else {
                 std::ptr::null_mut()
             },
@@ -252,7 +253,15 @@ pub extern "C" fn dispatch_cb(
 
     if stype & 0x40000 == 0 {
         let _isolate_scope = v8::IsolateScope::new(ctx.runtime.v8_isolate());
-        let _locker = v8::Locker::new(ctx.runtime.v8_isolate(), ctx.custom_archive);
+        let _locker = v8::Locker::new(
+            ctx.runtime.v8_isolate(),
+            if ctx.inspector_session_len > 0 {
+                // ctx.custom_archive
+                std::ptr::null_mut()
+            } else {
+                std::ptr::null_mut()
+            },
+        );
         let _auto_check = deno_core::IsolateAutoCheck::new(ctx.runtime.v8_isolate());
         let rt = unsafe { &mut *ctx.tokio_rt };
         let _rt_guard = rt.enter();
@@ -298,7 +307,7 @@ pub extern "C" fn init_cb(
     let loader_path = get_env(ctx.skynet, "js_loader", "./js/lib/loader.js");
 
     let _isolate_scope = v8::IsolateScope::new(ctx.runtime.v8_isolate());
-    let _locker = v8::Locker::new(ctx.runtime.v8_isolate(), ctx.custom_archive);
+    let _locker = v8::Locker::new(ctx.runtime.v8_isolate(), std::ptr::null_mut());
     let _auto_check = deno_core::IsolateAutoCheck::new(ctx.runtime.v8_isolate());
     let rt = unsafe { &mut *ctx.tokio_rt };
     let _rt_guard = rt.enter();
