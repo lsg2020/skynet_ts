@@ -21,6 +21,7 @@ mod mod_tls;
 #[repr(C)]
 pub struct snjs<'a> {
     skynet: *const c_void,
+    skynet_handle: u32,
     tokio_rt: *mut tokio::runtime::Runtime,
     runtime: Box<deno_core::JsRuntime>,
     custom_archive: *mut c_void,
@@ -140,6 +141,7 @@ pub extern "C" fn snjs_create() -> *mut snjs<'static> {
 
     let ctx = Box::new(snjs {
         skynet: ptr::null(),
+        skynet_handle: 0,
         runtime: runtime,
         locker: ptr::null_mut(),
         tokio_rt: unsafe { TOKIO_RT },
@@ -238,6 +240,42 @@ pub extern "C" fn dispatch_th_cb(
     0
 }
 
+fn dispatch_impl(
+    ctx: &mut snjs,
+    stype: c_int,
+    session: c_int,
+    source: c_int,
+    msg: *const c_void,
+    sz: size_t,
+) {
+    let raw_type = stype & 0xffff;
+    if raw_type == interface::PTYPE_DENO_ASYNC {
+        let poll_result = ctx
+            .runtime
+            .poll_event_loop(unsafe { &mut *ctx.waker_context }, false);
+        if let std::task::Poll::Ready(Err(err)) = poll_result {
+            let err_msg = std::ffi::CString::new(format!(
+                "SkynetTs Uncaught {:?}",
+                err
+            ))
+            .unwrap();
+            unsafe { interface::skynet_error(ctx.skynet, err_msg.as_ptr()) };
+        }
+    } else {
+        mod_skynet::dispatch(ctx, raw_type, session, source, msg as *const u8, sz);
+
+        let promise_exception = ctx.runtime.check_promise_exceptions();
+        if let Err(err) = promise_exception {
+            let err_msg = std::ffi::CString::new(format!(
+                "SkynetTs Uncaught {:?}",
+                err
+            ))
+            .unwrap();
+            unsafe { interface::skynet_error(ctx.skynet, err_msg.as_ptr()) };
+        }
+    }
+}
+
 #[no_mangle]
 pub extern "C" fn dispatch_cb(
     _skynet: *const c_void,
@@ -266,23 +304,9 @@ pub extern "C" fn dispatch_cb(
         let rt = unsafe { &mut *ctx.tokio_rt };
         let _rt_guard = rt.enter();
 
-        let raw_type = stype & 0xffff;
-        if raw_type == interface::PTYPE_DENO_ASYNC {
-            let _r = ctx
-                .runtime
-                .poll_event_loop(unsafe { &mut *ctx.waker_context }, false);
-        } else {
-            mod_skynet::dispatch(ctx, raw_type, session, source, msg as *const u8, sz);
-        }
+        dispatch_impl(ctx, stype, session, source, msg, sz);
     } else {
-        let raw_type = stype & 0xffff;
-        if raw_type == interface::PTYPE_DENO_ASYNC {
-            let _r = ctx
-                .runtime
-                .poll_event_loop(unsafe { &mut *ctx.waker_context }, false);
-        } else {
-            mod_skynet::dispatch(ctx, raw_type, session, source, msg as *const u8, sz);
-        }
+        dispatch_impl(ctx, stype, session, source, msg, sz);
     }
 
     0
@@ -456,6 +480,7 @@ pub extern "C" fn snjs_init(ptr: *mut snjs, skynet: *const c_void, args: *const 
     ctx.waker = Box::into_raw(waker);
     let waker = unsafe { &mut *ctx.waker };
     ctx.waker_context = Box::into_raw(Box::new(std::task::Context::from_waker(waker)));
+    ctx.skynet_handle = handle_id;
 
     // it must be first message
     unsafe {

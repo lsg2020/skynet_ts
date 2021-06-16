@@ -147,6 +147,13 @@ pub fn dispatch(
     let this = v8::undefined(tc_scope).into();
     let js_recv_cb = js_recv_cb_handle.get(tc_scope);
     js_recv_cb.call(tc_scope, this, &[v8_new_bs]);
+
+    /*
+    if tc_scope.has_caught() {
+        let exception = tc_scope.exception().unwrap();
+        let err1: Result<(), deno_core::error::AnyError> = deno_core::exception_to_err_result(tc_scope, exception, false);
+    }
+    */
 }
 
 pub fn op_skynet_callback(
