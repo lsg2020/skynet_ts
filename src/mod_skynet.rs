@@ -143,10 +143,11 @@ pub fn dispatch(
     drop(state);
     js_recv_cb.call(tc_scope, global, &[v8_new_bs]);
     */
-    let js_recv_cb_handle = skynet.cb.clone().unwrap();
-    let this = v8::undefined(tc_scope).into();
-    let js_recv_cb = js_recv_cb_handle.get(tc_scope);
-    js_recv_cb.call(tc_scope, this, &[v8_new_bs]);
+    if let Some(js_recv_cb_handle) = skynet.cb.clone() {
+        let this = v8::undefined(tc_scope).into();
+        let js_recv_cb = js_recv_cb_handle.get(tc_scope);
+        js_recv_cb.call(tc_scope, this, &[v8_new_bs]);
+    }
 
     /*
     if tc_scope.has_caught() {
