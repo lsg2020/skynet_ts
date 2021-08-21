@@ -31,6 +31,6 @@ openssl-sys = "0.9.59"
 ureq = "2.0.0"
 tungstenite = "0.11.1"
 
-rusty_v8 = {version = "0.22.3", path = "./rusty_v8"}
-deno_core = {path = "./deno/core", version = "0.89.0"}
-deno_runtime = {path = "./deno/runtime", version = "0.16.0"}
+rusty_v8 = {version = "0.26.0", path = "./rusty_v8"}
+deno_core = {path = "./deno/core", version = "0.97.0"}
+deno_runtime = {path = "./deno/runtime", version = "0.23.0"}
