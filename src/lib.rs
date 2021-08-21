@@ -79,19 +79,29 @@ pub extern "C" fn snjs_create() -> *mut snjs<'static> {
         deno_runtime::deno_webidl::init(),
         deno_runtime::deno_console::init(),
         deno_runtime::deno_url::init(),
-        deno_runtime::deno_web::init(deno_runtime::deno_web::BlobUrlStore::default(), None),
+        deno_runtime::deno_web::init(deno_runtime::deno_web::BlobStore::default(), None),
         deno_runtime::deno_fetch::init::<deno_runtime::permissions::Permissions>(
             "".to_string(),
+            None,
+            None,
+            None,
             None,
         ),
         deno_runtime::deno_websocket::init::<deno_runtime::permissions::Permissions>(
             "".to_string(),
             None,
+            None,
         ),
         //deno_runtime::deno_webstorage::init(options.location_data_dir.clone()),
         deno_runtime::deno_crypto::init(None),
+        deno_runtime::deno_broadcast_channel::init(
+            deno_runtime::deno_broadcast_channel::InMemoryBroadcastChannel::default(),
+            true,
+        ),
         deno_runtime::deno_webgpu::init(true),
         deno_runtime::deno_timers::init::<deno_runtime::permissions::Permissions>(),
+        // ffi
+        deno_runtime::deno_ffi::init::<deno_runtime::permissions::Permissions>(true),
         // Metrics
         deno_runtime::metrics::init(),
         // Runtime ops
@@ -99,17 +109,22 @@ pub extern "C" fn snjs_create() -> *mut snjs<'static> {
         //ops::worker_host::init(options.create_web_worker_cb.clone()),
         ops::fs_events::init(),
         ops::fs::init(),
-        ops::http::init(),
         ops::io::init(),
         ops::io::init_stdio(),
-        ops::net::init(),
+        deno_runtime::deno_tls::init(),
+        deno_runtime::deno_net::init::<deno_runtime::permissions::Permissions>(
+            None,
+            true,
+            None,
+        ),
         ops::os::init(),
         ops::permissions::init(),
-        ops::plugin::init(),
         ops::process::init(),
         ops::signal::init(),
-        ops::tls::init(),
         ops::tty::init(),
+        deno_runtime::deno_http::init(),
+        ops::http::init(),
+
         mod_skynet::init(),
         mod_tls::init(),
         mod_inspector::init(),
@@ -129,7 +144,7 @@ pub extern "C" fn snjs_create() -> *mut snjs<'static> {
         let _auto_check = deno_core::IsolateAutoCheck::new(&mut runtime.v8_isolate());
 
         for (filename, source) in plugin_js {
-            let _r = runtime.execute(filename, source);
+            let _r = runtime.execute_script(filename, source);
         }
     }
 
@@ -356,7 +371,7 @@ pub extern "C" fn init_cb(
             "bootstrap.mainRuntime({})",
             serde_json::to_string_pretty(&runtime_options).unwrap()
         );
-        let _r = ctx.runtime.execute("", &script);
+        let _r = ctx.runtime.execute_script("", &script);
 
         let inspector = if get_env(ctx.skynet, "js_inspector", "false") == "true" {
             let global = ctx.runtime.global_context();
@@ -408,9 +423,9 @@ pub extern "C" fn init_cb(
     "#;
     let _r = ctx
         .runtime
-        .execute(&base_path, &format!("JS_INIT_ARGS='{}'", args));
+        .execute_script(&base_path, &format!("JS_INIT_ARGS='{}'", args));
 
-    let r = ctx.runtime.execute(&base_path, &loader_script);
+    let r = ctx.runtime.execute_script(&base_path, &loader_script);
     if let Err(err) = r {
         let err_msg =
             std::ffi::CString::new(format!("can not loader {:?} err:{:?}", loader_path, err))
