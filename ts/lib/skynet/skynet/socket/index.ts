@@ -490,7 +490,7 @@ skynet.register_protocol({
         return [skynet_rt.socket_unpack(ptr1, ptr2, sz)];
     },
     dispatch: (context: skynet.CONTEXT, is_new_bs: boolean) => {
-        let buffer = skynet.get_shared_bs(is_new_bs);
+        let buffer = skynet.get_shared_bs_temp(is_new_bs);
         let offset = 0;
         let type = pack.decode_uint32(buffer, offset, true); offset += 4;
         let id = pack.decode_uint32(buffer, offset, true); offset += 4;

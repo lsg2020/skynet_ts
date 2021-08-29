@@ -29,6 +29,7 @@ pub struct snjs<'a> {
     waker: *mut std::task::Waker,
     waker_context: *mut std::task::Context<'a>,
     context: SkynetContext,
+    remainder_message: i32,
 
     locker: *mut v8::Locker,
     tokio_guard: *mut tokio::runtime::EnterGuard<'a>,
@@ -37,10 +38,13 @@ pub struct snjs<'a> {
 pub struct ContextData {
     skynet: *const libc::c_void,
     ctx: *const libc::c_void,
-    bs: Option<v8::SharedRef<v8::BackingStore>>,
     cb: Option<v8::Global<v8::Function>>,
     module_search_paths: Vec<String>,
     inspector: Option<Box<mod_inspector::Inspector>>,
+    bs: Option<v8::SharedRef<v8::BackingStore>>,
+    bs_offset: usize,
+    bs_flag: i32,
+    bs_temp: Option<v8::SharedRef<v8::BackingStore>>,
 }
 pub type SkynetContext = *mut ContextData;
 
@@ -166,6 +170,7 @@ pub extern "C" fn snjs_create() -> *mut snjs<'static> {
         waker: ptr::null_mut(),
         waker_context: ptr::null_mut(),
         context: ptr::null_mut(),
+        remainder_message: 0,
     });
 
     Box::into_raw(ctx)
@@ -220,7 +225,7 @@ pub extern "C" fn dispatch_th_cb(
     _skynet: *const c_void,
     ctx: *mut snjs,
     stype: c_int,
-    _n: c_int,
+    n: c_int,
 ) -> c_int {
     //println!("======= dispatch_th_cb {} {}", stype, n);
     let ctx = unsafe { &mut *ctx };
@@ -239,6 +244,7 @@ pub extern "C" fn dispatch_th_cb(
 
         let rt = unsafe { &mut *ctx.tokio_rt };
         ctx.tokio_guard = Box::into_raw(Box::new(rt.enter()));
+        ctx.remainder_message = n as i32
     } else {
         unsafe {
             let _r = Box::from_raw(ctx.tokio_guard);
@@ -262,6 +268,7 @@ fn dispatch_impl(
     source: c_int,
     msg: *const c_void,
     sz: size_t,
+    remainder_message: i32,
 ) {
     let raw_type = stype & 0xffff;
     if raw_type == interface::PTYPE_DENO_ASYNC {
@@ -277,7 +284,7 @@ fn dispatch_impl(
             unsafe { interface::skynet_error(ctx.skynet, err_msg.as_ptr()) };
         }
     } else {
-        mod_skynet::dispatch(ctx, raw_type, session, source, msg as *const u8, sz);
+        mod_skynet::dispatch(ctx, raw_type, session, source, msg as *const u8, sz, remainder_message);
 
         let promise_exception = ctx.runtime.check_promise_exceptions();
         if let Err(err) = promise_exception {
@@ -319,9 +326,10 @@ pub extern "C" fn dispatch_cb(
         let rt = unsafe { &mut *ctx.tokio_rt };
         let _rt_guard = rt.enter();
 
-        dispatch_impl(ctx, stype, session, source, msg, sz);
+        dispatch_impl(ctx, stype, session, source, msg, sz, 0);
     } else {
-        dispatch_impl(ctx, stype, session, source, msg, sz);
+        ctx.remainder_message = ctx.remainder_message - 1;
+        dispatch_impl(ctx, stype, session, source, msg, sz, ctx.remainder_message);
     }
 
     0
@@ -390,6 +398,9 @@ pub extern "C" fn init_cb(
             cb: None,
             module_search_paths: Vec::new(),
             inspector: inspector,
+            bs_offset: 0,
+            bs_flag: 0,
+            bs_temp: None,
         }));
         ctx.runtime
             .op_state()

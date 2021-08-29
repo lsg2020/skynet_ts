@@ -64,6 +64,7 @@ pub fn init() -> Extension {
             ("op_skynet_fetch_message", Box::new(op_skynet_fetch_message)),
             ("op_skynet_free", Box::new(op_skynet_free)),
             ("op_skynet_shared_bs", Box::new(op_skynet_shared_bs)),
+            ("op_skynet_shared_bs_temp", Box::new(op_skynet_shared_bs_temp)),
             ("op_skynet_callback", Box::new(op_skynet_callback)),
             (
                 "op_skynet_alloc_msg",
@@ -93,6 +94,7 @@ pub fn dispatch(
     source: c_int,
     msg: *const u8,
     sz: size_t,
+    remainder_message: i32,
 ) {
     /*
     let state_rc = deno_core::JsRuntime::state(ctx.runtime.v8_isolate());
@@ -105,19 +107,16 @@ pub fn dispatch(
         .unwrap();
     let scope = &mut v8::ContextScope::new(scope, context);
     */
-    let scope = &mut ctx.runtime.handle_scope();
-    let tc_scope = &mut v8::TryCatch::new(scope);
-
     let skynet = unsafe { &mut *ctx.context };
 
-    let offset: usize = 64;
-    let new_bs = get_shared_bs(skynet, tc_scope, sz + offset);
+    let head_sz: usize = 32;
+    let new_bs = get_shared_bs(skynet, ctx, sz + head_sz, skynet.bs_offset);
     let buf = unsafe {
         let bs = skynet.bs.as_ref().unwrap();
         get_backing_store_slice_mut(bs, 0, bs.byte_length())
     };
 
-    let mut index = 0;
+    let mut index = skynet.bs_offset;
     LittleEndian::write_i32(&mut buf[index..index + 4], stype);
     index = index + 4;
     LittleEndian::write_i32(&mut buf[index..index + 4], session);
@@ -128,10 +127,35 @@ pub fn dispatch(
     index = index + 4;
     LittleEndian::write_u64(&mut buf[index..index + 8], msg as u64);
     if sz > 0 {
-        buf[offset..offset + sz].copy_from_slice(unsafe { std::slice::from_raw_parts(msg, sz) });
+        buf[skynet.bs_offset + head_sz .. skynet.bs_offset + head_sz + sz].copy_from_slice(unsafe { std::slice::from_raw_parts(msg, sz) });
     }
 
-    let v8_new_bs = v8::Boolean::new(tc_scope, new_bs).into();
+    skynet.bs_offset = skynet.bs_offset + head_sz + sz;
+    if new_bs {
+        skynet.bs_flag = skynet.bs_flag | 1;
+    }
+
+    if remainder_message == 0 || skynet.bs_offset > 1024 * 1024 {
+        //let scope = &mut ctx.runtime.handle_scope();
+        //let tc_scope = &mut v8::TryCatch::new(scope);
+        let tc_scope = &mut ctx.runtime.handle_scope();
+
+        let mut sz = skynet.bs_offset;
+        if (skynet.bs_flag & 1) == 1 {
+            sz = 1 << 24 | sz;
+        }
+
+        skynet.bs_flag = 0;
+        skynet.bs_offset = 0;
+
+        let v8_sz = v8::Integer::new(tc_scope, sz as i32).into();
+        if let Some(js_recv_cb_handle) = skynet.cb.clone() {
+            let this = v8::undefined(tc_scope).into();
+            let js_recv_cb = js_recv_cb_handle.get(tc_scope);
+            js_recv_cb.call(tc_scope, this, &[v8_sz]);
+        }
+    }
+
 
     /*
     let global = context.global(tc_scope).into();
@@ -143,11 +167,6 @@ pub fn dispatch(
     drop(state);
     js_recv_cb.call(tc_scope, global, &[v8_new_bs]);
     */
-    if let Some(js_recv_cb_handle) = skynet.cb.clone() {
-        let this = v8::undefined(tc_scope).into();
-        let js_recv_cb = js_recv_cb_handle.get(tc_scope);
-        js_recv_cb.call(tc_scope, this, &[v8_new_bs]);
-    }
 
     /*
     if tc_scope.has_caught() {
@@ -189,6 +208,24 @@ pub fn op_skynet_shared_bs(
 
     let shared_ab = {
         let ab = v8::SharedArrayBuffer::with_backing_store(scope, skynet.bs.as_mut().unwrap());
+        ab
+    };
+    rv.set(shared_ab.into())
+}
+
+pub fn op_skynet_shared_bs_temp(
+    _state: std::cell::RefMut<deno_core::JsRuntimeState>,
+    op_state: Rc<RefCell<OpState>>,
+    scope: &mut v8::HandleScope,
+    _args: v8::FunctionCallbackArguments,
+    rv: &mut v8::ReturnValue,
+) {
+    let mut op_state_rc = op_state.borrow_mut();
+    let skynet = op_state_rc.borrow_mut::<SkynetContext>();
+    let skynet = unsafe { &mut **skynet };
+
+    let shared_ab = {
+        let ab = v8::SharedArrayBuffer::with_backing_store(scope, skynet.bs_temp.as_mut().unwrap());
         ab
     };
     rv.set(shared_ab.into())
@@ -448,41 +485,63 @@ pub fn op_skynet_socket_shutdown(
     Ok(())
 }
 
-const SHARED_MIN_SZ: usize = 128;
-const SHARED_MAX_SZ: usize = 64 * 1024;
 pub fn get_shared_bs(
     skynet: &mut crate::ContextData,
-    scope: &mut v8::HandleScope,
+    ctx: &mut crate::snjs,
     sz: usize,
+    offset: usize,
 ) -> bool {
     let shared_bs = &skynet.bs;
     let mut new_bs = false;
+    let alloc_sz = sz + offset;
     let _bs = match shared_bs {
-        Some(bs) if bs.byte_length() >= sz => bs,
+        Some(bs) if bs.byte_length() >= alloc_sz => bs,
         _ => {
-            let mut alloc_sz = SHARED_MIN_SZ;
-            if let Some(bs) = shared_bs {
-                alloc_sz = if bs.byte_length() > 0 {
-                    bs.byte_length() * 2
-                } else {
-                    SHARED_MIN_SZ
-                };
-            }
-            alloc_sz = (sz as f32 / alloc_sz as f32).ceil() as usize * alloc_sz;
-            if alloc_sz >= SHARED_MAX_SZ {
-                alloc_sz = (sz as f32 / SHARED_MIN_SZ as f32).ceil() as usize * SHARED_MIN_SZ;
-            } else if alloc_sz < SHARED_MIN_SZ {
-                alloc_sz = SHARED_MIN_SZ;
-            }
-
             //let mut buf = Vec::new();
             //buf.resize(alloc_sz, 0);
             //let bs = v8::SharedArrayBuffer::new_backing_store_from_boxed_slice(buf.into_boxed_slice(),);
-            let bs = v8::SharedArrayBuffer::new_backing_store(scope, alloc_sz);
+            let scope = &mut ctx.runtime.handle_scope();
+            let bs = v8::SharedArrayBuffer::new_backing_store(scope, alloc_sz*2);
+            let bs = Some(bs.make_shared());
             new_bs = true;
 
-            skynet.bs = Some(bs.make_shared());
+
+            if offset > 0 {
+                let old_buf = unsafe {
+                    let bs = skynet.bs.as_ref().unwrap();
+                    get_backing_store_slice_mut(bs, 0, bs.byte_length())
+                };
+                let new_buf = unsafe {
+                    let bs = bs.as_ref().unwrap();
+                    get_backing_store_slice_mut(bs, 0, bs.byte_length())
+                };
+            
+                new_buf[0..offset].copy_from_slice(&old_buf[0..offset]);
+            }
+
+            skynet.bs = bs;
             skynet.bs.as_ref().unwrap()
+        }
+    };
+    new_bs
+}
+
+pub fn get_shared_bs_temp(
+    skynet: &mut crate::ContextData,
+    scope: &mut v8::HandleScope,
+    alloc_sz: usize,
+) -> bool {
+    let shared_bs = &skynet.bs_temp;
+    let mut new_bs = false;
+    let _bs = match shared_bs {
+        Some(bs) if bs.byte_length() >= alloc_sz => bs,
+        _ => {
+            let bs = v8::SharedArrayBuffer::new_backing_store(scope, alloc_sz*2);
+            let bs = Some(bs.make_shared());
+            new_bs = true;
+
+            skynet.bs_temp = bs;
+            skynet.bs_temp.as_ref().unwrap()
         }
     };
     new_bs
@@ -536,9 +595,9 @@ pub fn op_skynet_socket_unpack(
     let skynet = op_state_rc.borrow_mut::<SkynetContext>();
     let skynet = unsafe { &mut **skynet };
 
-    let new_bs = get_shared_bs(skynet, scope, buffer_len);
+    let new_bs = get_shared_bs_temp(skynet, scope, buffer_len);
     let buf = unsafe {
-        let bs = skynet.bs.as_ref().unwrap();
+        let bs = skynet.bs_temp.as_ref().unwrap();
         get_backing_store_slice_mut(bs, 0, bs.byte_length())
     };
 
@@ -580,7 +639,7 @@ pub fn op_skynet_socket_unpack(
     if socket_message.msg_type == interface::SKYNET_SOCKET_TYPE_UDP {
         if udp_addrstring == std::ptr::null() {
             LittleEndian::write_i16(&mut buf[index..index + 2], 0);
-        // index += 2;
+            // index += 2;
         } else {
             LittleEndian::write_i16(&mut buf[index..index + 2], udp_addrsz as i16);
             index += 2;

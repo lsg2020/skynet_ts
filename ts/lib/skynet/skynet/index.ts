@@ -143,6 +143,14 @@ export function get_shared_bs(is_new_bs: boolean) {
     }
     return shared_bs;
 }
+let shared_bs_temp: Uint8Array;
+export function get_shared_bs_temp(is_new_bs: boolean) {
+    if (!shared_bs_temp || is_new_bs) {
+        shared_bs_temp = new Uint8Array(skynet_rt.shared_bs_temp());
+    }
+    return shared_bs_temp;
+}
+
 let cur_msgptr: Uint8Array = new Uint8Array(8);
 let cur_msgptr_1: number = 0;
 let cur_msgptr_2: number = 0;
@@ -153,18 +161,33 @@ export function get_cur_msgptr(): [number, number] {
     }
     return [cur_msgptr_1, cur_msgptr_2];
 }
-async function dispatch_message(is_new_bs: boolean) {
+let message_head_sz = 32;
+async function dispatch_message(msgsz: number) {
+    let is_new_bs = (msgsz >> 24) != 0;
+    msgsz = msgsz & 0xffffff;
     let shared_buf = get_shared_bs(is_new_bs);
-    let prototype = pack.decode_uint32(shared_buf, 0, true);
-    let session = pack.decode_uint32(shared_buf, 4, true);
-    let source = pack.decode_uint32(shared_buf, 8, true);
-    let sz = pack.decode_uint32(shared_buf, 12, true);
-    cur_msgptr_1 = 0;
-    cur_msgptr_2 = 0;
-    pack.decode_rawbuf(shared_buf, 16, 8, cur_msgptr);
-    //cur_msgptr = pack.decode_biguint(shared_buf, 16, 8, true);
-    let offset = 64;
+    let offset = 0;
 
+    while (offset+message_head_sz <= msgsz) {
+        let prototype = pack.decode_uint32(shared_buf, offset+0, true);
+        let session = pack.decode_uint32(shared_buf, offset+4, true);
+        let source = pack.decode_uint32(shared_buf, offset+8, true);
+        let sz = pack.decode_uint32(shared_buf, offset+12, true);
+        cur_msgptr_1 = 0;
+        cur_msgptr_2 = 0;
+        pack.decode_rawbuf(shared_buf, offset+16, 8, cur_msgptr);
+
+        try {
+            dispatch_message_impl(prototype, session, source, sz, shared_buf, offset + message_head_sz)
+        } catch(e) {
+            skynet_rt.error(`dispatch message error:${e}`)
+        }
+
+        offset = offset + message_head_sz + sz
+    }
+}
+
+async function dispatch_message_impl(prototype: number, session: number, source: number, sz: number, shared_buf: Uint8Array, offset: number) {
     if (prototype == PTYPE_ID.RESPONSE) {
         let response_func = session_id_callback.get(session);
         if (!response_func) {

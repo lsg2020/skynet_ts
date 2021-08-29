@@ -144,6 +144,10 @@
         return core.opRawSync("op_skynet_shared_bs");
     }
 
+    function shared_bs_temp() {
+        return core.opRawSync("op_skynet_shared_bs_temp");
+    }
+
     function callback(cb) {
         core.opRawSync("op_skynet_callback", cb);
     }
@@ -166,6 +170,7 @@
         fetch_message,
         free,
         shared_bs,
+        shared_bs_temp,
         callback,
         set_jslib_paths,
         alloc_msg,
